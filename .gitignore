@@ -1,0 +1,18 @@
+# Local secrets: the DuckDNS token goes only into your own (host) build.
+build/host-config.json
+# Generated
+bin/
+build/bin/
+build/release/
+frontend/dist/
+node_modules/
+# Legacy Electron app: build output and local server data (database, uploads)
+legado-electron/dist/
+legado-electron/dist-src/
+build/windows/installer/tmp/
+legado-electron/server/data/
+*.db
+*.db-shm
+*.db-wal
+# Local tooling
+.claude/

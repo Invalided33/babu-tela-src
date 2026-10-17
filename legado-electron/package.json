@@ -1,0 +1,79 @@
+{
+  "name": "babu-tela",
+  "productName": "Babu Tela",
+  "version": "0.4.0",
+  "description": "Chat de comunidades com texto, voz e vídeo",
+  "main": "app/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "server": "node server/index.js",
+    "app": "electron .",
+    "test": "node server/smoke.js",
+    "dist": "node build/prepare.js && electron-builder --win",
+    "dist:public": "node build/prepare.js --public && electron-builder --win",
+    "deploy": "powershell -ExecutionPolicy Bypass -File deploy/deploy.ps1"
+  },
+  "build": {
+    "appId": "com.prosa.app",
+    "productName": "Babu Tela",
+    "copyright": "© 2026 Babu Tela. Todos os direitos reservados.",
+    "icon": "build/icon.png",
+    "files": [
+      {
+        "from": "dist-src/app",
+        "to": "app",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "dist-src/server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "package.json"
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": true
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Babu Tela"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://localhost:3210/updates"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "express": "^5.3.0",
+    "multer": "^2.4.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "javascript-obfuscator": "^5.9.0"
+  },
+  "babuTela": {
+    "publicServerUrl": ""
+  }
+}

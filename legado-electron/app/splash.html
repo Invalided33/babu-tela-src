@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' file:">
+<title>Babu Tela</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: radial-gradient(circle at 30% 20%, #211f4d, #100f2c 70%); color: #ecebff; font: 14px "Segoe UI", system-ui, sans-serif; -webkit-app-region: drag; user-select: none; overflow: hidden; }
+  .box { text-align: center; }
+  .logo { display: block; width: 88px; height: 88px; margin: 0 auto 18px; filter: drop-shadow(0 8px 24px #5763ee55); animation: pulse 1.6s ease-in-out infinite; }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  p { margin: 0; color: #a3a2c9; min-height: 20px; }
+  @keyframes pulse { 50% { transform: scale(.9); opacity: .75; } }
+  @media (prefers-reduced-motion: reduce) { .logo { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="box"><img class="logo" src="icon.png" alt=""><h1>Babu Tela</h1><p id="status">Iniciando…</p></div>
+</body>
+</html>

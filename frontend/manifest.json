@@ -1,0 +1,11 @@
+{
+  "name": "Babu Tela",
+  "short_name": "Babu Tela",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d0c1d",
+  "theme_color": "#0d0c1d",
+  "lang": "pt-BR",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}
