@@ -1079,6 +1079,41 @@ impl Smoke {
                     core.voice.toggle_draw();
                 }
             }
+            // texto:<x>,<y>,<words> places a text annotation on the
+            // active surface (opened with `anotar:<nome>`), at (x, y)
+            // from 0 to 1 across and down the picture, with the typed
+            // words. The pen must already be on the text tool
+            // (`ferramenta:text`); the colour and size come from the pen
+            // too (`cor:<n>`, `tamanho:<n>`).
+            ("texto", rest) => {
+                let mut parts = rest.splitn(3, ',');
+                let (x, y, text) = (parts.next(), parts.next(), parts.next());
+                let (Some(x), Some(y), Some(text)) = (x, y, text) else {
+                    crate::logln!("smoke: texto esperava x,y,palavras: {rest}");
+                    self.misses.push(step.to_owned());
+                    return Duration::ZERO;
+                };
+                let (Ok(x), Ok(y)) = (x.parse::<f32>(), y.parse::<f32>()) else {
+                    crate::logln!("smoke: texto esperava x,y numéricos: {rest}");
+                    self.misses.push(step.to_owned());
+                    return Duration::ZERO;
+                };
+                let ink = core.voice.ink();
+                let Some(surface) = ink.active() else {
+                    crate::logln!("smoke: texto sem anotação ativa");
+                    self.misses.push(step.to_owned());
+                    return Duration::ZERO;
+                };
+                let who = core.users.get(&surface.owner).map(|u| u.username.clone());
+                let page = who.as_deref().and_then(|w| ink_page(core, w));
+                match page.filter(|p| p.surface == surface) {
+                    Some(page) if ink.insert_text(page, egui::pos2(x, y), text) => {}
+                    _ => {
+                        crate::logln!("smoke: texto não entrou: {rest}");
+                        self.misses.push(step.to_owned());
+                    }
+                }
+            }
             // anotar:<user name> opens the annotations' toolbar over what
             // they share (their screen, or the slide of theirs on screen),
             // as its "Anotar" button does; anotar:fim closes it.

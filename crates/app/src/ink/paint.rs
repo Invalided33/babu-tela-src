@@ -47,6 +47,10 @@ fn stroke(painter: &Painter, l: &Look, map: impl Fn(Pos2) -> Pos2, height: f32) 
     if c.a() == 0 {
         return;
     }
+    if l.tool == Tool::Text {
+        text_stroke(painter, l, &map, height, c);
+        return;
+    }
     let width = (l.width * height).max(1.0);
     // Round ends for the pens, while they are opaque (where an end
     // overlaps the line, a see-through one would show darker).
@@ -67,6 +71,27 @@ fn stroke(painter: &Painter, l: &Look, map: impl Fn(Pos2) -> Pos2, height: f32) 
             }
         }
     }
+}
+
+/// Draws the words of a `Tool::Text` stroke at the first point of `l`,
+/// at the chosen font size (`l.width` is the font size as a fraction of
+/// the picture's height).
+fn text_stroke(painter: &Painter, l: &Look, map: &impl Fn(Pos2) -> Pos2, height: f32, c: Color32) {
+    let (Some(text), Some(anchor)) = (l.text.as_deref(), l.points.first()) else {
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+    let px = (l.width * height).max(10.0);
+    let at = map(*anchor);
+    painter.text(
+        at,
+        egui::Align2::LEFT_TOP,
+        text,
+        egui::FontId::proportional(px),
+        c,
+    );
 }
 
 /// The author's name, on their colour, next to where the stroke is now.

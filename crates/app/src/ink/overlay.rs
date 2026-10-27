@@ -1028,6 +1028,11 @@ fn paint(
             area = join(area, Some(Area::around(at, at + size, 2.0)));
         }
     }
+    for l in looks.iter().filter(|l| l.tool == Tool::Text) {
+        if let Some((at, size)) = text_place(words, l, fw, fh) {
+            area = join(area, Some(Area::around(at, at + size, 2.0)));
+        }
+    }
     let area = area.and_then(|a| a.within(w, h));
     let dirty = join(drawn, area);
     if let Some(d) = dirty {
@@ -1035,11 +1040,50 @@ fn paint(
         if let Some(mut pixmap) = PixmapMut::from_bytes(dib.bytes(), w as u32, h as u32) {
             raster::draw(&mut pixmap, looks, true);
         }
+        for l in looks.iter().filter(|l| l.tool == Tool::Text) {
+            text_blit(words, dib, l);
+        }
         for (i, name) in names {
             tag(words, dib, &looks[*i], name, scale);
         }
     }
     (area, dirty)
+}
+
+/// Where someone's text annotation goes in a `w` × `h` bitmap and how big
+/// Windows drew it at the chosen font size.
+fn text_place(
+    words: &mut HashMap<(String, u32), Words>,
+    l: &Look,
+    w: f32,
+    h: f32,
+) -> Option<(Pos2, Vec2)> {
+    let text = l.text.as_deref()?;
+    let anchor = l.points.first()?;
+    if text.is_empty() || l.color[3] == 0 {
+        return None;
+    }
+    let px = (l.width * h).max(10.0).round() as u32;
+    let t = words_for(words, text, px, false)?;
+    let at = pos2(anchor.x * w, anchor.y * h);
+    Some((at, vec2(t.w as f32, t.h as f32)))
+}
+
+/// Draws someone's text annotation into `dib`, in the author's colour.
+fn text_blit(words: &mut HashMap<(String, u32), Words>, dib: &mut Dib, l: &Look) {
+    let (w, h) = (dib.w, dib.h);
+    let Some((at, _)) = text_place(words, l, w as f32, h as f32) else {
+        return;
+    };
+    let text = match l.text.as_deref() {
+        Some(t) => t,
+        None => return,
+    };
+    let px = (l.width * h as f32).max(10.0).round() as u32;
+    let Some(t) = words_for(words, text, px, false) else {
+        return;
+    };
+    blit_words(dib.bytes(), w, h, t, at, l.color);
 }
 
 /// Everything a stroke can touch in a `w` × `h` bitmap: its lines (as
@@ -1232,6 +1276,7 @@ fn icon_svg(name: &str) -> &'static str {
         "square" => include_str!("../../assets/icons/square.svg"),
         "circle" => include_str!("../../assets/icons/circle.svg"),
         "eraser" => include_str!("../../assets/icons/eraser.svg"),
+        "text" => include_str!("../../assets/icons/text.svg"),
         "undo" => include_str!("../../assets/icons/undo.svg"),
         "redo" => include_str!("../../assets/icons/redo.svg"),
         "trash" => include_str!("../../assets/icons/trash.svg"),
@@ -1249,17 +1294,19 @@ fn tool_icon(t: Tool) -> &'static str {
         Tool::Arrow => "arrow",
         Tool::Rect => "square",
         Tool::Ellipse => "circle",
+        Tool::Text => "text",
         Tool::Eraser => "eraser",
     }
 }
 
-const TOOLS: [Tool; 7] = [
+const TOOLS: [Tool; 8] = [
     Tool::Vanish,
     Tool::Pen,
     Tool::Highlighter,
     Tool::Arrow,
     Tool::Rect,
     Tool::Ellipse,
+    Tool::Text,
     Tool::Eraser,
 ];
 

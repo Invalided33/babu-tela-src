@@ -70,6 +70,8 @@ pub enum Tool {
     Arrow,
     Rect,
     Ellipse,
+    /// A piece of typed text, placed where it was clicked.
+    Text,
     /// Takes away the strokes it touches.
     Eraser,
 }
@@ -83,6 +85,7 @@ impl Tool {
             Tool::Arrow => "arrow",
             Tool::Rect => "rect",
             Tool::Ellipse => "ellipse",
+            Tool::Text => "text",
             Tool::Eraser => "eraser",
         }
     }
@@ -96,6 +99,7 @@ impl Tool {
             Tool::Arrow,
             Tool::Rect,
             Tool::Ellipse,
+            Tool::Text,
         ]
         .into_iter()
         .find(|t| t.wire() == s)
@@ -115,6 +119,7 @@ impl Tool {
             Tool::Arrow => "Seta",
             Tool::Rect => "Retângulo",
             Tool::Ellipse => "Elipse",
+            Tool::Text => "Texto",
             Tool::Eraser => "Borracha",
         }
     }
@@ -130,11 +135,14 @@ pub struct Stroke {
     pub tool: Tool,
     /// RGBA, not premultiplied.
     pub color: [u8; 4],
-    /// A fraction of the picture's height.
+    /// A fraction of the picture's height. For `Tool::Text` it is the
+    /// font size (ascent), still a fraction of the picture's height.
     pub width: f32,
     /// From 0 to 1 across and down the picture. A shape has two: where it
-    /// began and where it ends.
+    /// began and where it ends. A text has one, where its top left sits.
     pub points: Vec<Pos2>,
+    /// For `Tool::Text`, what was typed. None for every other tool.
+    pub text: Option<String>,
     /// When it ended; None while it is being drawn.
     pub done: Option<Instant>,
     /// Its last change: one whose end never comes (its author's connection
@@ -195,6 +203,24 @@ pub const COLORS: [[u8; 3]; 8] = [
 /// Thin, medium and thick: of the picture's height (a full HD screen's 3,
 /// 5 and 11 pixels).
 pub const SIZES: [f32; 3] = [0.0025, 0.005, 0.01];
+
+/// For `Tool::Text`, the font size (as a fraction of the picture's
+/// height) that each width slot of the toolbar maps to. On a 1080p
+/// picture the three come out to 24, 36 and 54 px.
+pub const TEXT_SIZES: [f32; 3] = [0.022, 0.034, 0.050];
+
+/// The longest a text annotation goes, in bytes. Each new character while
+/// the user types is checked against this.
+pub const MAX_TEXT_BYTES: usize = 500;
+
+/// The nearest valid char boundary at or before `cap`, so a truncation of
+/// a UTF-8 string does not split a code point.
+fn nearest_char(s: &str, cap: usize) -> usize {
+    (0..=cap.min(s.len()))
+        .rev()
+        .find(|i| s.is_char_boundary(*i))
+        .unwrap_or(0)
+}
 
 /// The highlighter: this many times wider, and this see-through.
 const MARKER_WIDTH: f32 = 4.0;
@@ -284,6 +310,8 @@ impl Action {
 #[derive(Clone, Debug)]
 pub struct Look {
     pub tool: Tool,
+    /// For `Tool::Text`, what was typed. None for every other tool.
+    pub text: Option<String>,
     /// RGBA, not premultiplied, with the fading and the highlighter's
     /// transparency in it.
     pub color: [u8; 4],
@@ -654,10 +682,11 @@ impl Ink {
     // ------------------------------------------------------------ drawing
 
     /// Starts a stroke of my pen at `p` on `page`. False when I may not
-    /// annotate there (or the pen is the eraser).
+    /// annotate there (or the pen is the eraser or the text tool, which
+    /// has its own path through [`Ink::insert_text`]).
     pub fn begin(&self, page: Page, p: Pos2) -> bool {
         let mut s = self.lock();
-        if !Self::may(&s, page.surface) || s.pen.tool == Tool::Eraser {
+        if !Self::may(&s, page.surface) || s.pen.tool == Tool::Eraser || s.pen.tool == Tool::Text {
             return false;
         }
         Self::finish_drawing(&mut s);
@@ -679,6 +708,7 @@ impl Ink {
             } else {
                 vec![p]
             },
+            text: None,
             done: None,
             touched: Instant::now(),
         };
@@ -699,6 +729,53 @@ impl Ink {
         let id = s.next_id;
         s.next_id = s.next_id.wrapping_add(1);
         id
+    }
+
+    /// Puts the typed text at `p` (0 to 1 across and down the picture) on
+    /// `page`, as a stroke of `Tool::Text`. Nothing comes out when the
+    /// text is empty, the pen is not on text, or I cannot annotate here.
+    /// The size of the font comes from the pen's size slot (`TEXT_SIZES`).
+    pub fn insert_text(&self, page: Page, p: Pos2, text: &str) -> bool {
+        let text = text.trim();
+        if text.is_empty() {
+            return false;
+        }
+        let mut s = self.lock();
+        if !Self::may(&s, page.surface) || s.pen.tool != Tool::Text {
+            return false;
+        }
+        Self::finish_drawing(&mut s);
+        if s.strokes.len() >= MAX_STROKES {
+            return false;
+        }
+        let pen = s.pen;
+        let id = Self::new_id(&mut s);
+        let p = clamp(p);
+        let mut owned = text.to_owned();
+        if owned.len() > MAX_TEXT_BYTES {
+            owned.truncate(nearest_char(&owned, MAX_TEXT_BYTES));
+        }
+        let now = Instant::now();
+        let stroke = Stroke {
+            author: s.me,
+            id,
+            page,
+            tool: Tool::Text,
+            color: with_alpha(COLORS[pen.color], 255),
+            width: TEXT_SIZES[pen.size],
+            points: vec![p],
+            text: Some(owned),
+            // A text annotation is already finished when it is placed:
+            // there is no further input to come.
+            done: Some(now),
+            touched: now,
+        };
+        Self::send(&s, wire::stroke(&stroke, true));
+        s.strokes.push(stroke.clone());
+        s.undo.push(Action::Drew(stroke));
+        s.redo.clear();
+        self.changed(&s, page.surface);
+        true
     }
 
     /// My stroke goes on to `p` (a shape: now ends there). When its points
@@ -1049,6 +1126,7 @@ impl Ink {
                 color,
                 width,
                 points,
+                text,
                 done,
             } => {
                 let surface = page.surface;
@@ -1071,6 +1149,15 @@ impl Ink {
                     points.truncate(1);
                     points.push(last);
                 }
+                let text = text.filter(|_| tool == Tool::Text).map(|t| {
+                    // The length cap keeps a mislaid message from using up
+                    // all of someone's memory.
+                    let mut t = t;
+                    if t.len() > MAX_TEXT_BYTES {
+                        t.truncate(nearest_char(&t, MAX_TEXT_BYTES));
+                    }
+                    t
+                });
                 let stroke = Stroke {
                     author,
                     id,
@@ -1079,6 +1166,7 @@ impl Ink {
                     color,
                     width,
                     points,
+                    text,
                     done: done.then_some(now),
                     touched: now,
                 };
@@ -1233,6 +1321,7 @@ fn look(st: &Stroke, opacity: f32, tag: bool) -> Look {
     let [r, g, b, a] = st.color;
     Look {
         tool: st.tool,
+        text: st.text.clone(),
         color: [r, g, b, (f32::from(a) * alpha * opacity).round() as u8],
         width,
         points: st.points.clone(),
@@ -1254,7 +1343,9 @@ pub fn lines(
     map: impl Fn(Pos2) -> Pos2,
     height: f32,
 ) -> Vec<Vec<Pos2>> {
-    if points.is_empty() {
+    if points.is_empty() || tool == Tool::Text {
+        // Text has its own render path (an egui layout, or Windows' own
+        // text through the overlay): nothing comes out as a line.
         return Vec::new();
     }
     if !tool.shape() {

@@ -19,13 +19,14 @@ use crate::ink::{self, COLORS, Ink, Page, Pen, SIZES, Surface, Tool};
 use crate::theme::{self, ACCENT, MUTED, TEXT};
 
 /// The tools, in the toolbar's order.
-const TOOLS: [(Tool, Icon); 7] = [
+const TOOLS: [(Tool, Icon); 8] = [
     (Tool::Vanish, Icon::Vanish),
     (Tool::Pen, Icon::Edit),
     (Tool::Highlighter, Icon::Marker),
     (Tool::Arrow, Icon::Arrow),
     (Tool::Rect, Icon::Square),
     (Tool::Ellipse, Icon::Circle),
+    (Tool::Text, Icon::Text),
     (Tool::Eraser, Icon::Eraser),
 ];
 
@@ -97,6 +98,10 @@ fn draw(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
     }
     let id = Id::unique(("ink-draw", page.surface.owner, page.surface.id));
     let tool = ink.pen().tool;
+    if tool == Tool::Text {
+        text_input(ui, ink, page, picture, clip);
+        return;
+    }
     let resp = ui
         .interact(area, id, Sense::click_and_drag())
         .on_hover_cursor(if tool == Tool::Eraser {
@@ -165,6 +170,113 @@ fn draw(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
     {
         ink.finish();
     }
+}
+
+/// What the text tool shows while someone types a text annotation: where
+/// the anchor is (0 to 1 across and down the picture) and what has been
+/// typed so far. Kept in egui's own frame data (`ui.data`) so the input
+/// stays open across frames while the user types.
+#[derive(Clone, Default)]
+struct TextDraft {
+    at: Pos2,
+    text: String,
+}
+
+/// The text tool: a click places the anchor, a text box opens there,
+/// Enter commits the typed text as a stroke and Esc (or clicking out)
+/// cancels. `page` and `picture` are the page being annotated and where
+/// its picture is on screen.
+fn text_input(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
+    let area = picture.intersect(clip);
+    let id = Id::unique(("ink-text", page.surface.owner, page.surface.id, page.n));
+    let resp = ui
+        .interact(area, id, Sense::click())
+        .on_hover_cursor(CursorIcon::Text);
+    crate::smoke::target(|| "anotacao".into(), area);
+    let mut draft: TextDraft = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+    let had_draft = !draft.text.is_empty() || draft.at != Pos2::ZERO;
+    let clicked = resp.clicked_by(PointerButton::Primary);
+    let pointer = ui.input(|i| i.pointer.interact_pos());
+    if clicked && let Some(at) = pointer {
+        // Clicking somewhere new while a draft is open commits the
+        // previous one (Enter is not the only way to confirm).
+        if !draft.text.is_empty() {
+            ink.insert_text(page, draft.at, &draft.text);
+        }
+        draft = TextDraft {
+            at: to_page(picture, at),
+            text: String::new(),
+        };
+        ui.data_mut(|d| d.insert_temp(id, draft.clone()));
+    }
+    if !had_draft && draft.text.is_empty() && !clicked {
+        return;
+    }
+    // The input, laid at the anchor over the picture.
+    let pen = ink.pen();
+    let anchor = pos2(
+        picture.left() + draft.at.x * picture.width(),
+        picture.top() + draft.at.y * picture.height(),
+    );
+    let font_px = (crate::ink::TEXT_SIZES[pen.size] * picture.height()).max(14.0);
+    let width = (picture.width() * 0.5).clamp(140.0, 480.0);
+    let input_rect = Rect::from_min_size(anchor, vec2(width, font_px * 1.6 + 10.0));
+    let edit_id = id.with("edit");
+    let text_was_empty_before = draft.text.is_empty();
+    let (commit, cancel) = ui
+        .scope_builder(UiBuilder::new().max_rect(input_rect), |ui| {
+            ui.painter().rect(
+                input_rect,
+                CornerRadius::same(6),
+                Color32::from_black_alpha(0xd0),
+                Stroke::new(1.0, color_from_slot(pen.color)),
+                egui::StrokeKind::Inside,
+            );
+            let inner = input_rect.shrink(5.0);
+            let text_edit = egui::TextEdit::multiline(&mut draft.text)
+                .id(edit_id)
+                .margin(egui::Margin::ZERO)
+                .font(egui::FontId::proportional(font_px))
+                .text_color(color_from_slot(pen.color))
+                .char_limit(crate::ink::MAX_TEXT_BYTES)
+                .desired_width(inner.width())
+                .hint_text(egui::RichText::new("Digite e Enter para colocar").color(MUTED));
+            let resp = ui
+                .scope_builder(UiBuilder::new().max_rect(inner), |ui| ui.add(text_edit))
+                .inner;
+            if resp.gained_focus() || text_was_empty_before {
+                resp.request_focus();
+            }
+            let keys = ui.input(|i| {
+                let enter = i.key_pressed(Key::Enter) && !i.modifiers.shift;
+                let esc = i.key_pressed(Key::Escape);
+                let clicked_out = i.pointer.primary_pressed()
+                    && i.pointer
+                        .press_origin()
+                        .is_some_and(|p| !input_rect.contains(p));
+                (enter, esc, clicked_out)
+            });
+            (keys.0, keys.1 || keys.2)
+        })
+        .inner;
+    if cancel {
+        ui.data_mut(|d| d.remove::<TextDraft>(id));
+        return;
+    }
+    if commit {
+        if !draft.text.trim().is_empty() {
+            ink.insert_text(page, draft.at, &draft.text);
+        }
+        ui.data_mut(|d| d.remove::<TextDraft>(id));
+        return;
+    }
+    ui.data_mut(|d| d.insert_temp(id, draft));
+}
+
+/// The RGBA colour of slot `i` in [`crate::ink::COLORS`], as a Color32.
+fn color_from_slot(i: usize) -> Color32 {
+    let [r, g, b] = crate::ink::COLORS[i.min(crate::ink::COLORS.len() - 1)];
+    Color32::from_rgb(r, g, b)
 }
 
 /// Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), as in Zoom.

@@ -78,6 +78,7 @@ icons! {
     Star => "star",
     StarOn => "star-on",
     Sticker => "sticker",
+    Text => "text",
     Trash => "trash",
     Undo => "undo",
     Users => "users",

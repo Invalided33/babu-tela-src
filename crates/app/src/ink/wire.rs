@@ -43,6 +43,8 @@ pub enum Msg {
         color: [u8; 4],
         width: f32,
         points: Vec<Pos2>,
+        /// For `Tool::Text`, what was typed. Not sent for the other tools.
+        text: Option<String>,
         done: bool,
     },
     More {
@@ -102,6 +104,9 @@ pub fn stroke(s: &Stroke, with_author: bool) -> Value {
     });
     if with_author {
         v["a"] = json!(s.author);
+    }
+    if let Some(t) = s.text.as_ref() {
+        v["x"] = json!(t);
     }
     v
 }
@@ -198,6 +203,7 @@ pub fn read(v: &Value) -> Option<Msg> {
                 color,
                 width: w as f32 / SCALE,
                 points,
+                text: v["x"].as_str().map(|t| t.to_owned()),
                 done: v["e"].as_bool().unwrap_or(false),
             })
         }
@@ -223,5 +229,69 @@ pub fn read(v: &Value) -> Option<Msg> {
             all: v["all"].as_bool().unwrap_or(false),
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Kind, Page, Stroke, Surface, Tool};
+    use super::*;
+    use std::time::Instant;
+
+    fn text_stroke(text: &str) -> Stroke {
+        Stroke {
+            author: 3,
+            id: 7,
+            page: Page {
+                surface: Surface { owner: 3, id: 42 },
+                n: 0,
+            },
+            tool: Tool::Text,
+            color: [255, 0, 0, 255],
+            width: 0.034,
+            points: vec![Pos2::new(0.1, 0.2)],
+            text: Some(text.to_owned()),
+            done: Some(Instant::now()),
+            touched: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn text_strokes_round_trip() {
+        let s = text_stroke("olá, mundo! 🙂");
+        let encoded = stroke(&s, false);
+        let msg = read(&encoded).expect("decodes");
+        match msg {
+            Msg::Stroke {
+                tool,
+                text,
+                points,
+                done,
+                ..
+            } => {
+                assert_eq!(tool, Tool::Text);
+                assert_eq!(text.as_deref(), Some("olá, mundo! 🙂"));
+                assert_eq!(points.len(), 1);
+                assert!(done);
+            }
+            other => panic!("not a stroke: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_text_strokes_leave_the_text_field_out() {
+        let mut s = text_stroke("x");
+        s.tool = Tool::Pen;
+        s.text = None;
+        let encoded = stroke(&s, false);
+        assert!(encoded.get("x").is_none(), "text leaked out: {encoded}");
+    }
+
+    #[test]
+    fn surfaces_round_trip_as_before() {
+        let list = vec![(1, Kind::Screen, true), (2, Kind::Slides, false)];
+        let v = surfaces(&list);
+        let msg = read(&v).expect("decodes");
+        assert_eq!(msg, Msg::Surfaces(list));
     }
 }
