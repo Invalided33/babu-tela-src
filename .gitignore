@@ -1,16 +1,13 @@
-# Local secrets: the DuckDNS token goes only into your own (host) build.
-build/host-config.json
+# Local secrets: the Cloudflare keys, the Google sign-in client and the
+# server's other secrets. Keep a copy somewhere safe.
+build/cloudflare.json
 # Generated
-bin/
-build/bin/
+crates/worker/build/
+crates/worker/target/
 build/release/
-frontend/dist/
-node_modules/
-# Legacy Electron app: build output and local server data (database, uploads)
-legado-electron/dist/
-legado-electron/dist-src/
-build/windows/installer/tmp/
-legado-electron/server/data/
+# The test video `cargo xtask medir midia` writes the first time.
+build/medidas/*.mp4
+target/
 *.db
 *.db-shm
 *.db-wal

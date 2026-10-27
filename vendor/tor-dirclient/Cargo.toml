@@ -1,0 +1,154 @@
+# tor-dirclient 0.47.0 (part of Arti, the Tor Project's Tor in Rust) as
+# published on crates.io (the manifest cargo normalized for it, without its
+# dev-dependencies, which only its own repository builds), with one change
+# the Babu Tela app needs. The workspace's [patch.crates-io] puts it in place
+# of the published crate. Licensed as the original, MIT OR Apache-2.0 (the
+# Apache text is in LICENSE-APACHE).
+#
+# The change, in src/lib.rs (`read_and_decompress`): the 10 seconds a
+# directory download may take now count from the last byte that came, not
+# from the start of the body (ten minutes in all at most). The consensus is
+# a megabyte or two, so with the 10 seconds in all, a client that gets it at
+# less than some 150 KB/s (a slow mobile link, a busy directory cache)
+# gives every download up partway ("Partial response", "directory timed
+# out"), starts it again, and never gets onto the Tor network: what a debug
+# build of the app did here, its cells handled at some 70 KB/s. The code's
+# own comment already wonders whether 10 seconds may be too short for some
+# users. This goes once Arti times a body out by its stalls, or makes the
+# timeout an option.
+
+[package]
+edition = "2024"
+rust-version = "1.92"
+name = "tor-dirclient"
+version = "0.47.0"
+authors = [
+    "The Tor Project, Inc.",
+    "Nick Mathewson <nickm@torproject.org>",
+]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Downloads specific Tor network directory objects over the Tor network"
+homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+readme = "README.md"
+keywords = [
+    "tor",
+    "arti",
+    "download",
+    "async",
+]
+categories = [
+    "network-programming",
+    "cryptography",
+]
+license = "MIT OR Apache-2.0"
+repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+__is_experimental = []
+default = [
+    "xz",
+    "zstd",
+]
+experimental = []
+full = [
+    "hs-client",
+    "hs-service",
+    "relay",
+    "xz",
+    "zstd",
+    "routerdesc",
+    "tor-circmgr/full",
+    "tor-error/full",
+    "tor-hscrypto?/full",
+    "tor-linkspec/full",
+    "tor-llcrypto/full",
+    "tor-netdoc/full",
+    "tor-proto/full",
+    "tor-rtcompat/full",
+    "web-time-compat/full",
+]
+hs-client = ["tor-hscrypto"]
+hs-service = ["tor-hscrypto"]
+relay = []
+routerdesc = []
+xz = ["async-compression/xz"]
+zstd = ["async-compression/zstd"]
+
+[lib]
+name = "tor_dirclient"
+path = "src/lib.rs"
+
+[dependencies.async-compression]
+version = "0.4.5"
+features = [
+    "futures-io",
+    "zlib",
+]
+
+[dependencies.base64ct]
+version = "1.5.1"
+
+[dependencies.derive_more]
+version = "2.0.1"
+features = ["full"]
+
+[dependencies.futures]
+version = "0.3.14"
+
+[dependencies.hex]
+version = "0.4"
+
+[dependencies.http]
+version = "1.0"
+
+[dependencies.httparse]
+version = "1.2"
+
+[dependencies.httpdate]
+version = "1.0"
+
+[dependencies.itertools]
+version = "0.15.0"
+
+[dependencies.thiserror]
+version = "2"
+
+[dependencies.tor-circmgr]
+version = "0.47.0"
+
+[dependencies.tor-error]
+version = "0.47.0"
+
+[dependencies.tor-hscrypto]
+version = "0.47.0"
+optional = true
+
+[dependencies.tor-linkspec]
+version = "0.47.0"
+
+[dependencies.tor-llcrypto]
+version = "0.47.0"
+
+[dependencies.tor-netdoc]
+version = "0.47.0"
+
+[dependencies.tor-proto]
+version = "0.47.0"
+
+[dependencies.tor-rtcompat]
+version = "0.47.0"
+
+[dependencies.tracing]
+version = "0.1.36"
+
+[dependencies.web-time-compat]
+version = "0.3.0"
+

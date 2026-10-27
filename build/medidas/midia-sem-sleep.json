@@ -1,0 +1,16 @@
+{
+  "midia.fim.ana.fora_dos_heaps": 267.40000000000003,
+  "midia.fim.ana.heaps": 45.8,
+  "midia.ini.ana.cpu": 11.266905802178762,
+  "midia.ini.ana.ram": 315.5926983173077,
+  "midia.ini.ana.ram_max": 203.6171875,
+  "midia.ini.ana.ram_propria": 136.703125,
+  "midia.intervalo.p50": 33.57,
+  "midia.intervalo.p95": 33.93,
+  "midia.passadas": 380.0,
+  "midia.quadro.p50": 0.56,
+  "midia.quadro.p95": 0.69,
+  "midia.quadros": 351.0,
+  "midia.textura.p50": 0.0,
+  "midia.textura.p95": 0.0
+}

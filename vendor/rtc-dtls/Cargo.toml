@@ -1,0 +1,104 @@
+# rtc-dtls 0.21.1 as published on crates.io (the manifest cargo normalized
+# for it, without its examples, benches and dev-dependencies, which only its
+# own repository builds), with one addition the Babu Tela app needs. The
+# workspace's [patch.crates-io] puts it in place of the published crate.
+#
+# The addition: an extra secret (`ConfigBuilder::with_extra_secret`) that
+# both ends mix into the handshake, the way the ECDHE_PSK suites of RFC 5489
+# do: the premaster secret becomes the ECDHE secret and the extra one, each
+# with its length, before the master secret is derived from it (in
+# src/flight/flight4.rs for the server and src/flight/flight5.rs for the
+# client, `mix_extra_secret` in src/prf/mod.rs). Every key that comes from
+# the master secret then depends on both: the records (data channels) and
+# the SRTP keys exported for the media. The app exchanges that secret in
+# its end-to-end sealed signalling (X-Wing, post-quantum), so a recording of
+# the call stays closed even to someone who later breaks the ECDHE; and the
+# Finished messages fail unless both ends had the same secret. Without it
+# (None, the default) the handshake is the published one.
+
+[package]
+edition = "2024"
+name = "rtc-dtls"
+version = "0.21.1"
+authors = ["Rain Liu <yliu@webrtc.rs>"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "RTC DTLS in Rust"
+homepage = "https://webrtc.rs"
+documentation = "https://docs.rs/rtc-dtls"
+readme = "README.md"
+keywords = [
+    "sansio",
+    "networking",
+    "protocols",
+]
+categories = ["network-programming"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/webrtc-rs/rtc"
+resolver = "2"
+
+[features]
+crypto-aws-lc-rs = [
+    "crypto/crypto-aws-lc-rs",
+    "rustls/aws-lc-rs",
+    "rcgen/aws_lc_rs",
+]
+crypto-ring = [
+    "crypto/crypto-ring",
+    "rustls/ring",
+    "rcgen/ring",
+]
+default = ["crypto-ring"]
+
+[lib]
+name = "rtc_dtls"
+path = "src/lib.rs"
+
+[dependencies.bytecheck]
+version = "0.8"
+
+[dependencies.byteorder]
+version = "1.5.0"
+
+[dependencies.bytes]
+version = "1.12.0"
+
+[dependencies.crypto]
+version = "0.21.1"
+default-features = false
+package = "rtc-crypto"
+
+[dependencies.der-parser]
+version = "9.0.0"
+
+[dependencies.log]
+version = "0.4.33"
+
+[dependencies.pem]
+version = "3.0.3"
+
+[dependencies.rcgen]
+version = "0.14.8"
+features = ["pem"]
+default-features = false
+
+[dependencies.rkyv]
+version = "0.8.17"
+
+[dependencies.rustls]
+version = "0.23.27"
+features = ["std"]
+default-features = false
+
+[dependencies.shared]
+version = "0.21.1"
+features = ["replay"]
+default-features = false
+package = "rtc-shared"
+
+[dependencies.x509-parser]
+version = "0.16.0"

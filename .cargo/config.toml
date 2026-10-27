@@ -1,0 +1,16 @@
+# The project's tooling: `cargo xtask servidor`, `release`, `publicar`,
+# `testar`, `chamada`, `dev`, `icones` (crates/xtask).
+[alias]
+xtask = "run --quiet --package xtask --"
+
+# Windows executables carry the C runtime inside, so they run on machines
+# without the Visual C++ Redistributable (like the Go builds did).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+# libopus (the voice codec) is built with CMake, and has to be told to use
+# the same static C runtime as the rest of the app; see the file itself.
+# CMake comes with the Visual Studio Build Tools ("C++ CMake tools");
+# `cargo xtask` finds it on its own.
+CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = { value = "build/opus-static-crt.cmake", relative = true }

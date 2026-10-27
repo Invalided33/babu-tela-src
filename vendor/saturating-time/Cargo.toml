@@ -1,0 +1,60 @@
+# saturating-time 0.5.0 (part of Arti, the Tor Project's Tor in Rust) as
+# published on crates.io (the manifest cargo normalized for it), with one fix
+# the Babu Tela app needs. The workspace's [patch.crates-io] puts it in place
+# of the published crate. Licensed as the original, MIT OR Apache-2.0 (the
+# Apache text is in LICENSE-APACHE).
+#
+# The fix, in src/internal.rs (`find_limit`): the smallest and largest
+# SystemTime are found by stepping from the epoch with a step that halves
+# whenever it would go past the limit, down to 1 ns. On Windows the clock
+# counts 100 ns at a time, so at the limit a step under 100 ns leaves the time
+# as it was, and checked_sub still returns Some: the step never halved again,
+# and the loop never ended (one core busy for good). Arti asks for that limit
+# as it reads the first consensus (`validity_time_range` in tor-netdoc), so
+# on Windows the Tor inside the app never got past "fetching a consensus". A
+# step that changes nothing now counts as one that goes too far. This goes
+# once a release of saturating-time has the same.
+
+[package]
+edition = "2024"
+rust-version = "1.92"
+name = "saturating-time"
+version = "0.5.0"
+authors = [
+    "The Tor Project, Inc.",
+    "Clara Engler <cve@torproject.org>",
+]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "A trait for limits and saturations on types inside std::time"
+readme = "README.md"
+keywords = [
+    "time",
+    "system-time",
+    "instant",
+    "saturating",
+]
+categories = [
+    "date-and-time",
+    "os",
+    "rust-patterns",
+]
+license = "MIT OR Apache-2.0"
+repository = "https://gitlab.torproject.org/tpo/core/arti.git"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+full = ["web-time-compat/full"]
+
+[lib]
+name = "saturating_time"
+path = "src/lib.rs"
+
+[dependencies.web-time-compat]
+version = "0.3.0"

@@ -1,0 +1,19 @@
+DPDFNet, the noise suppression of Babu Tela's calls
+
+dpdfnet2_48khz_hr_f16.onnx is the 48 kHz DPDFNet-2 model by Ceva
+(Daniel Rika, Nino Sapir and Ido Gus), released under the Apache License 2.0
+(LICENSE, next to this file).
+
+  Paper:  "DPDFNet: Boosting DeepFilterNet2 via Dual-Path RNN",
+          https://arxiv.org/abs/2512.16420
+  Code:   https://github.com/ceva-ip/DPDFNet
+  Model:  https://huggingface.co/Ceva-IP/DPDFNet, onnx/dpdfnet2_48khz_hr.onnx
+          (revision dd6818d00f50c836fed43a6243ebe49116de5964, SHA-256
+          7f0575a5cec0ba4ffd8f8bd657e06d007e4ccdd955d76faab922b9d3291dc14b)
+
+Changed from the original: each of its 145 weight tensors with 64 values or
+more is stored as float16, behind a Cast node that turns it back into
+float32 when the model loads. The graph and its float32 arithmetic are
+otherwise the same; the file is half the size (5.3 MB instead of 10.5 MB)
+and what it outputs stays more than 60 dB below the signal away from the
+original's.

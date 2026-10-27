@@ -1,0 +1,15 @@
+{
+  "arquivos.app.envio_mb_s": 13.464103437974662,
+  "arquivos.fim.ana.fora_dos_heaps": 144.60000000000002,
+  "arquivos.fim.ana.heaps": 28.4,
+  "arquivos.ini.ana.cpu": 2.416069960829151,
+  "arquivos.ini.ana.ram": 186.2447509765625,
+  "arquivos.ini.ana.ram_max": 165.109375,
+  "arquivos.ini.ana.ram_propria": 108.13671875,
+  "arquivos.servidor.download_de_novo_mb_s": 36.29389434620519,
+  "arquivos.servidor.download_mb_s": 21.649252211149758,
+  "arquivos.servidor.download_pedacos_mb_s": 38.97940230933469,
+  "arquivos.servidor.envio_juntas_mb_s": 12.873651188340592,
+  "arquivos.servidor.envio_mb_s": 4.627260568619758,
+  "arquivos.servidor.primeiro_byte": 347.6839
+}

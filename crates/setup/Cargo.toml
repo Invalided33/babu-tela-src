@@ -1,0 +1,34 @@
+[package]
+# "Babu Tela Setup.exe": installs the app for the current user (no admin
+# prompt), and is also its uninstaller. Replaces the NSIS script: same
+# folder, same names and the same registry key, so it installs over any
+# earlier version. `cargo xtask release` builds it with the app inside.
+name = "babutela-setup"
+description = "Instalador do Babu Tela"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "babutela_setup"
+path = "src/lib.rs"
+
+[[bin]]
+name = "babutela-setup"
+path = "src/main.rs"
+
+[build-dependencies]
+winresource.workspace = true
+
+[dependencies]
+babutela-buildinfo.workspace = true
+lzma-rust2.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-registry.workspace = true
+# The update's lock, waiting for the app to quit and handing it the
+# foreground: the app already builds these bindings.
+windows-sys.workspace = true

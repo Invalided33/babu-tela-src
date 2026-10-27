@@ -1,0 +1,15 @@
+{
+  "figurinhas.animacoes": 42.0,
+  "figurinhas.fechado.ana.cpu": 0.1989806712919047,
+  "figurinhas.fechado.ana.ram": 196.4453125,
+  "figurinhas.fechado.ana.ram_max": 145.0,
+  "figurinhas.fechado.ana.ram_propria": 77.796875,
+  "figurinhas.fechado.texturas_mb": 4.309848,
+  "figurinhas.fim.ana.fora_dos_heaps": 181.7,
+  "figurinhas.fim.ana.heaps": 30.2,
+  "figurinhas.ini.ana.cpu": 3.039598357813128,
+  "figurinhas.ini.ana.ram": 196.24555121527777,
+  "figurinhas.ini.ana.ram_max": 144.68359375,
+  "figurinhas.ini.ana.ram_propria": 77.5078125,
+  "figurinhas.texturas_mb": 29.237488
+}

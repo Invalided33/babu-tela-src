@@ -1,0 +1,70 @@
+[package]
+name = "babutela"
+description = "Babu Tela: chat de comunidades com texto, voz e vídeo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+lzma-rust2.workspace = true
+winresource.workspace = true
+wuff.workspace = true
+
+[dependencies]
+babutela-buildinfo.workspace = true
+babutela-denoise.workspace = true
+arboard.workspace = true
+arti-client.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+betteroffice-pptx.workspace = true
+bytes.workspace = true
+bytemuck.workspace = true
+chrono.workspace = true
+cpal.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+epaint.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+image.workspace = true
+libcrux-kem.workspace = true
+nokhwa.workspace = true
+open.workspace = true
+openh264.workspace = true
+openh264-sys2.workspace = true
+opus.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+rav1d.workspace = true
+raw-window-handle.workspace = true
+reqwest.workspace = true
+rfd.workspace = true
+ring.workspace = true
+rodio.workspace = true
+rtc.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sonora.workspace = true
+symphonia.workspace = true
+resvg.workspace = true
+tiny-skia.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+tray-icon.workspace = true
+unicode-segmentation.workspace = true
+webpki-roots.workspace = true
+webrtc.workspace = true
+zip.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-capture.workspace = true
+windows-core.workspace = true
+windows-registry.workspace = true
+windows-sys.workspace = true

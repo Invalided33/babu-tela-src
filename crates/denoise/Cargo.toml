@@ -1,0 +1,11 @@
+[package]
+name = "babutela-denoise"
+description = "Supressão de ruído das chamadas do Babu Tela: a rede neural DPDFNet, em Rust puro"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+realfft.workspace = true
+tract-onnx.workspace = true

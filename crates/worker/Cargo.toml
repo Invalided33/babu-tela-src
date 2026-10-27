@@ -1,0 +1,40 @@
+[package]
+# The Babu Tela server as a Cloudflare Worker. Its own workspace: this crate
+# only builds for wasm32-unknown-unknown, so it stays out of the root one
+# (which builds the Windows app).
+#
+# The app's version lives in the root Cargo.toml and reaches here through
+# babutela-buildinfo; this number is only crate metadata.
+name = "babutela-worker"
+version = "0.0.0"
+edition = "2024"
+authors = ["Babu Tela"]
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+# Routing, JSON and crypto are written against the Worker runtime directly:
+# no axum, no tokio. A smaller module starts faster and leaves more of the
+# 10 ms of CPU the free plan gives each request.
+[dependencies]
+babutela-buildinfo = { path = "../buildinfo" }
+base64 = "0.23.1"
+console_error_panic_hook = "0.1.7"
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+hex = "0.4.3"
+hmac = "0.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+worker = "0.8.7"
+
+[profile.release]
+opt-level = "s"
+codegen-units = 1
+lto = true
+panic = "abort"

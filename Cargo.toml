@@ -1,0 +1,362 @@
+# Babu Tela: the desktop app (crates/app) and the pieces it shares with the
+# server. The server itself lives in crates/worker and runs on Cloudflare, so
+# it has its own workspace (it only builds for wasm32).
+#
+# Everything is Rust. The interface is native: egui/eframe drawing straight
+# to the window, with no embedded browser, no HTML and no JavaScript, and
+# there is no web version: the server only speaks the API.
+[workspace]
+resolver = "3"
+members = ["crates/buildinfo", "crates/app", "crates/denoise", "crates/setup", "crates/xtask"]
+# What is in vendor/ are dependencies (see [patch.crates-io]), not ours to
+# test.
+exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-time", "vendor/tor-dirclient"]
+
+# The version lives only here: the app, the server and the installer read it.
+[workspace.package]
+version = "0.12.0"
+edition = "2024"
+authors = ["Babu Tela"]
+publish = false
+
+# Latest stable release of every crate (checked on crates.io in October 2026).
+[workspace.dependencies]
+babutela-buildinfo = { path = "crates/buildinfo" }
+babutela-denoise = { path = "crates/denoise" }
+
+arboard = { version = "3.7.0", default-features = false, features = ["image-data"] }
+# Tor inside the app (Configurações → Privacidade, crates/app/src/tor.rs):
+# Arti, the Tor Project's own Tor in Rust, so nothing has to be installed.
+# rustls (with the ring the app installs) for its links, and its directory
+# cache in an SQLite built into the .exe.
+arti-client = { version = "0.47.0", default-features = false, features = ["tokio", "rustls", "compression", "static-sqlite"] }
+async-trait = "0.1.92"
+# Presenting a .pptx in a call: its slides drawn in Rust, inside the .exe,
+# with nobody needing PowerPoint (BetterOffice's parser, layout and its
+# tiny-skia raster; Apache 2.0).
+betteroffice-pptx = { version = "0.3.0", features = ["raster"] }
+bytes = "1.12.1"
+# Decoded video goes straight into egui's pixel type.
+bytemuck = "1.25.2"
+chrono = "0.4.45"
+# The audio devices (WASAPI).
+cpal = "0.18.2"
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "wgpu"] }
+egui = "0.37.0"
+egui_extras = { version = "0.37.0", default-features = false, features = ["image", "svg"] }
+# egui's painter. `color_fonts` makes it draw COLR/sbix/CBDT glyphs in their
+# own colours (Segoe UI Emoji is COLR); egui does not forward the feature.
+epaint = { version = "0.37.0", default-features = false, features = ["color_fonts"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+# Float16: `cargo xtask modelo` stores the noise suppression's weights in it,
+# at half the size.
+half = "2.7.1"
+hex = "0.4.3"
+hmac = "0.13.0"
+# End-to-end encryption (crates/app/src/e2e): base64 for what goes in JSON.
+base64 = "0.22.1"
+# X-Wing (X25519 + ML-KEM-768, the hybrid that holds against a quantum
+# computer), from Cryspen's libcrux, whose ML-KEM is formally verified.
+libcrux-kem = "0.0.10"
+# The generator libcrux takes (the operating system's).
+rand = "0.10.3"
+rand_core = "0.10.1"
+# Ed25519, HKDF and AES-256-GCM: the same ring rustls already uses.
+ring = "0.17.14"
+# The installer's payload: LZMA2 in an .xz stream, in pure Rust.
+lzma-rust2 = "0.23.0"
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+# The camera, through Media Foundation.
+nokhwa = { version = "0.10.11", features = ["input-msmf"] }
+open = "5.4.4"
+# H.264, which every browser decodes; built from Cisco's BSD sources.
+openh264 = "0.9.9"
+# Its C API's types, for changing an encoder's bitrate while it runs (the
+# crate above is built on this one, with the same features).
+openh264-sys2 = { version = "0.9.9", default-features = false }
+# The voice codec. Builds libopus with CMake (see .cargo/config.toml).
+opus = "0.4.0"
+# AV1 pictures from the others, decoded on the processor: dav1d, ported to
+# Rust, with its assembly (NASM, as openh264 needs). The cards' encoders make
+# 8-bit pictures, but rav1d 1.1 links its 16-bit assembly either way: with
+# `bitdepth_8` alone the build fails to link.
+rav1d = { version = "1.1.0", default-features = false, features = ["asm", "bitdepth_8", "bitdepth_16"] }
+raw-window-handle = "0.6.2"
+# The FFT around the noise suppression's network (crates/denoise).
+realfft = "3.5.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "multipart", "query", "rustls-no-provider", "socks", "stream"] }
+rfd = { version = "0.17.2", default-features = false, features = ["common-controls-v6"] }
+rodio = { version = "0.23.0", default-features = false, features = ["playback"] }
+rustls = { version = "0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rtc = "0.21.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+# Echo cancellation, noise suppression and gain: WebRTC's audio processing,
+# ported to Rust (what the browser did inside getUserMedia).
+sonora = "0.2.0"
+# Audio attachments, played inside the app: MP3, AAC (M4A), Vorbis and
+# Opus (Opus through the `opus` crate) in OGG, WAV, FLAC.
+symphonia = { version = "0.6.1", default-features = false, features = ["aac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+# The annotations over my own shared screen (ink/overlay.rs), drawn on the
+# processor into the window Windows composes: the same one BetterOffice
+# draws slides with, so nothing new comes in.
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+# The icons of the annotations' toolbar over my shared screen, drawn from
+# the interface's own SVGs (BetterOffice's draws slides with this one).
+resvg = { version = "0.48.1", default-features = false }
+tokio = { version = "1.53.3", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+# TURN over TLS, for networks without UDP (the WebRTC stack only speaks it
+# over UDP; see crates/app/src/voice/relay.rs).
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["logging", "ring", "tls12"] }
+webpki-roots = "1.0.9"
+tray-icon = "0.26.1"
+# Runs the noise suppression's neural network (DPDFNet, an ONNX model) in
+# pure Rust, inside the .exe: no ONNX Runtime DLL to ship. Without the
+# default `transformers` feature, which only language models use.
+tract-onnx = { version = "0.23.9", default-features = false }
+# Whole characters as people see them (a flag is two code points).
+unicode-segmentation = "1.13.3"
+# Calls: the same WebRTC the browsers speak, so a call can mix this app and
+# the web version. `rtc` is its core, needed directly for codecs and packets.
+webrtc = "0.21.1"
+windows-capture = "2.0.1"
+winresource = "0.1.34"
+# Unpacks the flag font (WOFF2) at build time.
+wuff = { version = "0.2.9", default-features = false, features = ["brotli"] }
+# Reads the fonts embedded in a .pptx (ppt/fonts/*.fntdata), which are
+# inside the zip; betteroffice-opc already depends on this.
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+# COM and WinRT: the installer's shortcuts and folder picker, the app's
+# videos (Media Foundation), the PC's sound for a screen share (WASAPI),
+# notifications and their activator, the screen share on the graphics card
+# (Graphics Capture, the card's encoder, and the preview egui's Direct3D 12
+# device draws from textures shared with it), and the pages of a PDF
+# presented in a call (Windows' own reader, Data.Pdf, with Storage to open
+# the file and read the picture back).
+windows = { version = "0.62.2", features = [
+    "Data_Pdf",
+    "Data_Xml_Dom",
+    "Foundation",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Storage",
+    "Storage_Streams",
+    "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_Security",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_Controls",
+    "Win32_UI_Notifications",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# The one `windows` above is built on: its #[implement] macro (the
+# notification activator's COM objects) names this crate directly.
+windows-core = "0.62.2"
+windows-registry = "0.100.0"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_Xps",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# rtc 0.21.1 (the core of webrtc) with a fix of ours, in place of the one on
+# crates.io, for the app and for webrtc alike: a negotiated data channel lost
+# the first message the other side sent the moment its side came up (the
+# calls' control channel and the files sent directly use one). Why and how is
+# at the top of vendor/rtc/Cargo.toml; the fix is upstream as
+# https://github.com/webrtc-rs/rtc/pull/292.
+#
+# And the DTLS under it, with a secret both ends hold mixed into the
+# handshake: the post-quantum one the app's sealed signalling carries
+# (crates/app/src/e2e/dtls.rs), so the calls' media and the files sent
+# directly stay closed to whoever records them and later breaks the ECDHE.
+# Why and how is at the top of vendor/rtc-dtls/Cargo.toml; vendor/rtc hands
+# the secret down to it. This one is ours: both stay until a release of
+# webrtc-rs mixes in such a secret itself.
+#
+# And two pieces of Arti (the Tor inside the app). Its directory client,
+# whose downloads now time out after 10 s without a byte instead of 10 s in
+# all: below some 150 KB/s the consensus never finished. And saturating-time,
+# whose search for the smallest SystemTime never ended on Windows (its clock
+# counts 100 ns at a time), with one core busy for good, the moment the first
+# consensus was read: on Windows the Tor inside the app never connected. Why
+# and how is at the top of vendor/tor-dirclient/Cargo.toml and
+# vendor/saturating-time/Cargo.toml.
+[patch.crates-io]
+rtc = { path = "vendor/rtc" }
+rtc-dtls = { path = "vendor/rtc-dtls" }
+tor-dirclient = { path = "vendor/tor-dirclient" }
+saturating-time = { path = "vendor/saturating-time" }
+
+# Thin LTO, parallel codegen and incremental: full LTO in one codegen unit
+# ran on one core for minutes and rebuilt the whole app in every release.
+# This way a release only redoes what changed, and the app measured within a
+# few percent of the full-LTO one (`cargo xtask medir`).
+[profile.release]
+codegen-units = 16
+lto = "thin"
+incremental = true
+strip = true
+
+# `cargo xtask medir` measures an app built like the installer's, in a
+# target folder of its own, so measuring leaves the release build alone.
+[profile.medir]
+inherits = "release"
+
+# `cargo xtask` runs as a debug build, and these do the heavy lifting there:
+# packing the installer (LZMA at the strongest preset) and hashing it for
+# the update and the download page.
+[profile.dev.package.lzma-rust2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+
+# The noise suppression's network, optimized in a debug build too, and
+# without the debug checks in its loops: as a plain debug build, each 10 ms
+# of a call took longer than 10 ms there. Built once; the rest of the app
+# stays a plain debug build. Generic code is compiled where it is used,
+# which is why the network has a crate of its own.
+[profile.dev.package.babutela-denoise]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.tract-core]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.tract-data]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.tract-linalg]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.ndarray]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.half]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.realfft]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.rustfft]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+# ndarray's matrix products, which some of tract's layers go through: left
+# out, the network took 9 ms per 10 ms instead of 2.
+[profile.dev.package.matrixmultiply]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+# Laying text out and drawing its glyphs, emoji above all: the emoji picker
+# lays out every emoji once to see which ones this PC draws (emoji.rs), and
+# that took 54 s as a plain debug build, 0.7 s optimized.
+[profile.dev.package.epaint]
+opt-level = 3
+[profile.dev.package.harfrust]
+opt-level = 3
+[profile.dev.package.skrifa]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.vello_cpu]
+opt-level = 3
+[profile.dev.package.vello_common]
+opt-level = 3
+[profile.dev.package.fearless_simd]
+opt-level = 3
+# Drawing a presentation's slides (slides/): reading the .pptx, laying it
+# out and painting it, then the pictures as PNG or JPEG and back into
+# textures. As a plain debug build a slide took 2 to 9 s.
+[profile.dev.package.betteroffice-drawingml]
+opt-level = 3
+[profile.dev.package.betteroffice-ooxml-diff]
+opt-level = 3
+[profile.dev.package.betteroffice-ooxml-text]
+opt-level = 3
+[profile.dev.package.betteroffice-opc]
+opt-level = 3
+[profile.dev.package.betteroffice-pptx]
+opt-level = 3
+[profile.dev.package.betteroffice-pptx-edit]
+opt-level = 3
+[profile.dev.package.betteroffice-pptx-parse]
+opt-level = 3
+[profile.dev.package.betteroffice-pptx-raster]
+opt-level = 3
+[profile.dev.package.betteroffice-pptx-render]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.rustybuzz]
+opt-level = 3
+[profile.dev.package.ttf-parser]
+opt-level = 3
+[profile.dev.package.yrs]
+opt-level = 3
+[profile.dev.package.quick-xml]
+opt-level = 3
+[profile.dev.package.zlib-rs]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+# Reading and optimizing the model (once per run).
+[profile.dev.package.tract-extra]
+opt-level = 3
+[profile.dev.package.tract-hir]
+opt-level = 3
+[profile.dev.package.tract-nnef]
+opt-level = 3
+[profile.dev.package.tract-onnx]
+opt-level = 3
+[profile.dev.package.tract-onnx-opl]
+opt-level = 3
