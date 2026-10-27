@@ -586,6 +586,9 @@ pub enum CallButton {
     Sound,
     Camera,
     Screen,
+    /// Shows or hides the native bar for annotating my own screen share.
+    /// Only drawn when a screen or window is being shared.
+    Draw,
     Music,
     Hang,
 }
@@ -594,10 +597,14 @@ pub enum CallButton {
 /// conectada", as Discord has them.
 pub const SOUND_BUTTONS: &[CallButton] = &[CallButton::Mic, CallButton::Sound, CallButton::Music];
 
-/// What stays under the call view: the camera, the screen and hanging up
-/// (the microphone and the sound are in the side panel).
-pub const STAGE_BUTTONS: &[CallButton] =
-    &[CallButton::Camera, CallButton::Screen, CallButton::Hang];
+/// What stays under the call view: the camera, the screen, drawing and
+/// hanging up (the microphone and the sound are in the side panel).
+pub const STAGE_BUTTONS: &[CallButton] = &[
+    CallButton::Camera,
+    CallButton::Screen,
+    CallButton::Draw,
+    CallButton::Hang,
+];
 
 /// Everything, for fullscreen, where the side panel is not on screen.
 pub const ALL_BUTTONS: &[CallButton] = &[
@@ -605,6 +612,7 @@ pub const ALL_BUTTONS: &[CallButton] = &[
     CallButton::Sound,
     CallButton::Camera,
     CallButton::Screen,
+    CallButton::Draw,
     CallButton::Music,
     CallButton::Hang,
 ];
@@ -616,11 +624,18 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
     let deaf = core.voice.deaf();
     let video = core.voice.video();
     let presenting = core.voice.presenting();
+    let drawing = core.voice.drawing();
     let big = side >= 48.0;
     let icon_size = if big { icons::LARGE } else { icons::SIZE };
     let plain = if big { Ib::Normal } else { Ib::Bare };
     ui.spacing_mut().item_spacing.x = if big { 10.0 } else { 2.0 };
     for &button in which {
+        // Drawing is only relevant when a screen or window is being
+        // shared; the button hides when the camera is on or nothing is
+        // shared, so a stale toggle does not sit on screen.
+        if button == CallButton::Draw && video != Some(Video::Screen) {
+            continue;
+        }
         let (icon, style, tip) = match button {
             CallButton::Mic => (
                 Icon::mic(mute),
@@ -650,6 +665,15 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                     plain
                 },
                 "Compartilhar tela",
+            ),
+            CallButton::Draw => (
+                Icon::Edit,
+                if drawing { Ib::On } else { plain },
+                if drawing {
+                    "Esconder a barra de desenho"
+                } else {
+                    "Desenhar sobre o que compartilho"
+                },
             ),
             CallButton::Music => (
                 Icon::Play,
@@ -683,6 +707,7 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                     c.open_share();
                 }
             }),
+            CallButton::Draw => acts.later(|c| c.voice.toggle_draw()),
             CallButton::Music => acts.later(Core::open_music),
             CallButton::Hang => acts.later(|c| c.voice.leave(false, Cue::Leave)),
         }

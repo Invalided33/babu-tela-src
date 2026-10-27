@@ -1069,6 +1069,16 @@ impl Smoke {
                     core.voice.go_to_slide(n.saturating_sub(1));
                 }
             }
+            // desenhar:on|off is the "Desenhar" button next to
+            // "Compartilhar tela": it opens or closes the native bar over
+            // the shared screen. Does nothing when nothing is being
+            // shared, exactly like the button.
+            ("desenhar", on) => {
+                let want = on == "on";
+                if core.voice.drawing() != want {
+                    core.voice.toggle_draw();
+                }
+            }
             // anotar:<user name> opens the annotations' toolbar over what
             // they share (their screen, or the slide of theirs on screen),
             // as its "Anotar" button does; anotar:fim closes it.

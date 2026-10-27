@@ -470,10 +470,13 @@ fn annotate_steps(
             };
             // Her own screen enlarged too, so her picture at the end shows
             // the toolbar. Beto clears his strokes before she stops him.
+            // `desenhar:on` turns on the bar over her own share (the
+            // "Desenhar" button, next to "Compartilhar tela"), which the
+            // check at the halfway mark expects.
             let look = if share.is_some() { "|zoom:ana" } else { "" };
             notes(
                 &format!(
-                    "go:first-server|join|{open}{look}|{}|anotar:ana|ferramenta:arrow|traco:0.6,0.6;0.9,0.9",
+                    "go:first-server|join|{open}{look}|{}|desenhar:on|anotar:ana|ferramenta:arrow|traco:0.6,0.6;0.9,0.9",
                     at(6000.0)
                 ),
                 "wait:2000|so-eu:on|desfazer",

@@ -198,8 +198,15 @@ pub struct Voice {
     /// The share starts again in another quality: it is the same thing
     /// shared, and its annotations stay.
     restarting: bool,
-    /// Everyone's strokes over my own shared screen (ink/overlay.rs).
+    /// Everyone's strokes over my own shared screen (ink/overlay.rs). It
+    /// only opens when `draw_wanted` is true: the bar jumping onto the
+    /// screen the moment someone starts sharing was in the way.
     overlay: Option<ink::overlay::Overlay>,
+    /// Whether the user asked for the drawing bar over their own shared
+    /// screen (the "Desenhar" button next to "Compartilhar tela"). Off by
+    /// default: viewers can still annotate what I share, through the
+    /// "Anotar" button on their copy.
+    draw_wanted: bool,
     /// Music in the call: shared with Core and the UI.
     music: Arc<crate::music::Music>,
     ctx: egui::Context,
@@ -257,6 +264,7 @@ impl Voice {
             ink: Ink::new(ctx.clone()),
             restarting: false,
             overlay: None,
+            draw_wanted: false,
             music,
             ctx,
         }
@@ -832,7 +840,10 @@ impl Voice {
             self.start_sound(s);
         }
         // A screen or a window can be annotated, a new one each time (and
-        // I see everyone's strokes over it); the camera cannot.
+        // I see everyone's strokes over it); the camera cannot. The bar
+        // over the shared screen only opens when the user asks for it with
+        // the "Desenhar" button; otherwise the strokes still get drawn by
+        // whoever watches, over their copy.
         if !self.restarting {
             // The last one's window goes first: it stops watching the
             // strokes as it goes.
@@ -840,11 +851,50 @@ impl Voice {
             match source {
                 Some(s @ (Source::Monitor(_) | Source::Window(_))) => {
                     let surface = self.ink.open_mine(ink::Kind::Screen, rtc::random_u32());
-                    let page = ink::Page { surface, n: 0 };
-                    self.overlay = ink::overlay::Overlay::start(self.ink.clone(), s, page);
+                    if self.draw_wanted {
+                        let page = ink::Page { surface, n: 0 };
+                        self.overlay = ink::overlay::Overlay::start(self.ink.clone(), s, page);
+                    }
                 }
                 _ => self.ink.close_mine(ink::Kind::Screen),
             }
+        }
+        self.push();
+    }
+
+    /// Whether the "Desenhar" button was turned on (so the bar is on, or
+    /// would be on if a screen were being shared).
+    pub fn drawing(&self) -> bool {
+        self.draw_wanted
+    }
+
+    /// Toggles the drawing bar on and off: the viewers can always
+    /// annotate what I share from their own side; this is only about the
+    /// native bar that goes over my own screen.
+    pub fn toggle_draw(&mut self) {
+        self.draw_wanted = !self.draw_wanted;
+        let Some(source) = self.source else {
+            // Nothing to do until something is shared; next `share` will
+            // honour the new state.
+            return;
+        };
+        if !matches!(source, Source::Monitor(_) | Source::Window(_)) {
+            return;
+        }
+        if self.draw_wanted {
+            if self.overlay.is_some() {
+                return;
+            }
+            // Reuses the surface opened when the share started (`share`
+            // called `open_mine` for it): a new id here would wipe out
+            // what has been drawn so far.
+            let Some(surface) = self.ink.mine(ink::Kind::Screen) else {
+                return;
+            };
+            let page = ink::Page { surface, n: 0 };
+            self.overlay = ink::overlay::Overlay::start(self.ink.clone(), source, page);
+        } else {
+            self.overlay = None;
         }
         self.push();
     }
