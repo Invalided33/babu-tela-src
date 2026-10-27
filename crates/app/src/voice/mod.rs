@@ -490,8 +490,13 @@ impl Voice {
         // lets it ask the connections to add the screen audio track as the
         // song starts.
         let (music_out_tx, music_out_rx) = unbounded_channel();
-        self.music
-            .activate(me, music_out_tx, screen_sound.clone(), cmds.clone());
+        self.music.activate(
+            me,
+            music_out_tx,
+            screen_sound.clone(),
+            cmds.clone(),
+            self.shared.clone(),
+        );
         let music = self.music.clone();
         // Whose screens' sound this side does not take, from the start.
         self.unwatched.clear();

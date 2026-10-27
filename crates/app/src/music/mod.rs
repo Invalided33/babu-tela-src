@@ -58,6 +58,12 @@ pub struct Music {
     /// (`Cmd::ScreenAudio(true)` when music starts, `(false)` on stop).
     cmds: Mutex<Option<UnboundedSender<crate::voice::rtc::Cmd>>>,
 
+    /// The call's shared audio state. The music player pushes the decoded
+    /// PCM into `screen_peer(me)` so the DJ hears the song too (there is
+    /// no Windows playback in the middle, and the remote peers get it
+    /// through `screen_packets`, not through this).
+    audio: Mutex<Option<Arc<crate::voice::audio::AudioShared>>>,
+
     /// A background task that watches the queue and starts or stops the
     /// local player when the DJ changes.
     dj: Mutex<Option<DjState>>,
@@ -91,6 +97,7 @@ impl Music {
             outgoing: Mutex::new(None),
             screen_packets: Mutex::new(None),
             cmds: Mutex::new(None),
+            audio: Mutex::new(None),
             dj: Mutex::new(None),
             generation: AtomicU64::new(0),
             extracting: AtomicBool::new(false),
@@ -113,14 +120,17 @@ impl Music {
 
     /// Called by Voice when the local user joins a call. The music module
     /// uses `outgoing` to post control messages to peers, encodes the
-    /// decoded music to Opus and writes it into `screen_packets`, and
-    /// asks the call to turn on the screen audio track with `cmds`.
+    /// decoded music to Opus and writes it into `screen_packets`, asks
+    /// the call to turn on the screen audio track with `cmds`, and
+    /// pushes the same PCM into `audio.screen_peer(me)` so the DJ hears
+    /// what everyone else hears.
     pub fn activate(
         self: &Arc<Music>,
         me: i64,
         outgoing: UnboundedSender<Outgoing>,
         screen_packets: UnboundedSender<crate::voice::audio::Packet>,
         cmds: UnboundedSender<crate::voice::rtc::Cmd>,
+        audio: Arc<crate::voice::audio::AudioShared>,
     ) {
         self.me.store(me, Ordering::Relaxed);
         *self.outgoing.lock().unwrap_or_else(PoisonError::into_inner) = Some(outgoing);
@@ -129,6 +139,7 @@ impl Music {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(screen_packets);
         *self.cmds.lock().unwrap_or_else(PoisonError::into_inner) = Some(cmds);
+        *self.audio.lock().unwrap_or_else(PoisonError::into_inner) = Some(audio);
         self.generation.fetch_add(1, Ordering::Relaxed);
         self.ctx.request_repaint();
     }
@@ -143,6 +154,7 @@ impl Music {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = None;
         *self.cmds.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.audio.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.stop_dj();
         self.queue.clear();
         self.generation.fetch_add(1, Ordering::Relaxed);
@@ -315,6 +327,19 @@ impl Music {
         else {
             return;
         };
+        let Some(audio) = self
+            .audio
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .cloned()
+        else {
+            return;
+        };
+        let me = self.me.load(Ordering::Relaxed);
+        // The buffer the local mixer pulls my own screen-audio from. The
+        // music player pushes into it so the DJ hears the song too.
+        let local = audio.screen_peer(me);
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_for_task = stop.clone();
@@ -358,6 +383,12 @@ impl Music {
                     if encoder_stop.load(Ordering::Relaxed) {
                         break;
                     }
+                    // Hear it on this PC through the same mixer screen
+                    // share sound rides on. The screen audio buffer is
+                    // stereo (as the song is), so no conversion is
+                    // needed. Done before the encoder so the DJ is never
+                    // behind what the peers hear.
+                    local.push(&chunk.samples);
                     encoder.feed(&chunk.samples, std::time::Instant::now());
                 }
             });

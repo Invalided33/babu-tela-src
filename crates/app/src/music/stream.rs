@@ -244,6 +244,13 @@ impl Resampler {
     }
 }
 
+/// Each PCM chunk is 10 ms of stereo, so the decoder paces the output at
+/// that rate: without this the whole song would land in the mixer's buffer
+/// at once (its `MAX_BUFFER` is 100 ms), the DJ would hear a split-second
+/// of music and nothing more, and the other side would see RTP timestamps
+/// jumping ahead of real time.
+const CHUNK_MS: u64 = 10;
+
 fn decode(
     data: Vec<u8>,
     ext: &str,
@@ -288,6 +295,13 @@ fn decode(
     let mut raw: Vec<f32> = Vec::new();
     let mut stereo: Vec<f32> = Vec::new();
 
+    // Pace the output at real time. The deadline for chunk `i` to leave
+    // is `started_at + i * CHUNK_MS`: the decoder sleeps until then
+    // before sending, so no burst of chunks overflows the receiver's
+    // jitter buffer and the DJ hears the song in real time too.
+    let started_at = std::time::Instant::now();
+    let mut chunks_out: u64 = 0;
+
     loop {
         if stop.load(Ordering::Relaxed) {
             break;
@@ -322,9 +336,21 @@ fn decode(
 
         while pending.len() >= CHUNK * 2 {
             let chunk: Vec<f32> = pending.drain(..CHUNK * 2).collect();
+            // Hold on until this chunk's slot in real time, so the local
+            // mixer and the peers' jitter buffers do not drown. One
+            // chunk-worth of lead keeps the mixer never dry.
+            let deadline = started_at
+                + std::time::Duration::from_millis(chunks_out.saturating_sub(1) * CHUNK_MS);
+            if let Some(wait) = deadline.checked_duration_since(std::time::Instant::now()) {
+                std::thread::sleep(wait);
+            }
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
             if pcm.send(Pcm { samples: chunk }).is_err() {
                 return Ok(());
             }
+            chunks_out += 1;
         }
     }
     // The last partial chunk, padded with silence so it still carries 10
