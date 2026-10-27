@@ -149,6 +149,8 @@ pub struct Ctx {
     pub slides: Arc<Slides>,
     /// The annotations over what is shared (ink/).
     pub ink: Arc<Ink>,
+    /// The music in the call: the queue, and the YouTube/SoundCloud reader.
+    pub music: Arc<crate::music::Music>,
 }
 
 /// How the call is going: per person, and the video budget.
@@ -755,6 +757,7 @@ async fn watch_control(
     events: Events,
     slides: Arc<Slides>,
     ink: Arc<Ink>,
+    music: Arc<crate::music::Music>,
 ) {
     let tell = |ev| {
         let _ = events.send((link, ev));
@@ -839,6 +842,8 @@ async fn watch_control(
                     }
                     // Annotations over what someone shares (ink/).
                     Some(t) if t.starts_with("ink") => ink.arrived(uid, &v),
+                    // The music in the call: add, skip, pause/play, state.
+                    Some(t) if crate::music::handles(t) => music.arrived(uid, &v),
                     _ => {}
                 }
             }
@@ -1796,6 +1801,7 @@ async fn new_peer(
         s.events.clone(),
         ctx.slides.clone(),
         ctx.ink.clone(),
+        ctx.music.clone(),
     ));
 
     let video_out = Arc::new(Mutex::new(None));
@@ -2228,6 +2234,12 @@ impl Call {
                     for msg in ctx.ink.hello() {
                         p.control.post_ordered(msg);
                     }
+                    // The music queue, so the new person sees what is
+                    // playing and what comes next.
+                    let snapshot = ctx.music.snapshot();
+                    if snapshot["queue"].as_array().is_some_and(|a| !a.is_empty()) {
+                        p.control.post(snapshot);
+                    }
                 }
             }
             Event::SlidesHello(uid) => {
@@ -2340,6 +2352,7 @@ pub async fn run(
     sound: UnboundedReceiver<audio::Packet>,
     screen_sound: UnboundedReceiver<audio::Packet>,
     mut pictures: UnboundedReceiver<EncodedFrame>,
+    mut music_out: UnboundedReceiver<crate::music::Outgoing>,
 ) {
     let (events, mut events_rx) = unbounded_channel();
     let pacer = Arc::new(Pacer::new(plan::START_BUDGET));
@@ -2541,6 +2554,16 @@ pub async fn run(
             Some(msg) = ink_rx.recv() => {
                 for p in call.peers.values() {
                     p.control.post_ordered(msg.clone());
+                }
+            }
+            Some(out) = music_out.recv() => {
+                match out.to {
+                    Some(uid) => if let Some(p) = call.peers.get(&uid) {
+                        p.control.post(out.msg);
+                    }
+                    None => for p in call.peers.values() {
+                        p.control.post(out.msg.clone());
+                    }
                 }
             }
             _ = ticks.tick() => call.tick(&ctx, &pacer),

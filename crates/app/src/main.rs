@@ -33,6 +33,7 @@ mod ink;
 mod markdown;
 mod media;
 mod model;
+mod music;
 mod net;
 mod notify;
 mod pictures;

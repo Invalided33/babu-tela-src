@@ -586,12 +586,13 @@ pub enum CallButton {
     Sound,
     Camera,
     Screen,
+    Music,
     Hang,
 }
 
-/// The microphone and the sound, by the gear under "Voz conectada", as
-/// Discord has them.
-pub const SOUND_BUTTONS: &[CallButton] = &[CallButton::Mic, CallButton::Sound];
+/// The microphone, the sound and the music, by the gear under "Voz
+/// conectada", as Discord has them.
+pub const SOUND_BUTTONS: &[CallButton] = &[CallButton::Mic, CallButton::Sound, CallButton::Music];
 
 /// What stays under the call view: the camera, the screen and hanging up
 /// (the microphone and the sound are in the side panel).
@@ -604,6 +605,7 @@ pub const ALL_BUTTONS: &[CallButton] = &[
     CallButton::Sound,
     CallButton::Camera,
     CallButton::Screen,
+    CallButton::Music,
     CallButton::Hang,
 ];
 
@@ -649,6 +651,15 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                 },
                 "Compartilhar tela",
             ),
+            CallButton::Music => (
+                Icon::Play,
+                if core.music.now_playing().is_some() {
+                    Ib::On
+                } else {
+                    plain
+                },
+                "Música",
+            ),
             CallButton::Hang => (Icon::Hang, Ib::Hang, "Desconectar"),
         };
         if !widgets::icon_button_sized(ui, icon, side, icon_size, style, tip).clicked() {
@@ -672,6 +683,7 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                     c.open_share();
                 }
             }),
+            CallButton::Music => acts.later(Core::open_music),
             CallButton::Hang => acts.later(|c| c.voice.leave(false, Cue::Leave)),
         }
     }

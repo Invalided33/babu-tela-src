@@ -331,6 +331,11 @@ pub enum Modal {
         /// once it has finished.
         incoming: Option<std::sync::mpsc::Receiver<crate::voice::sources::Choice>>,
     },
+    /// Music in the call: the queue, and the field for a new YouTube or
+    /// SoundCloud link.
+    Music {
+        link: String,
+    },
 }
 
 /// The share picker's tabs.
@@ -615,6 +620,8 @@ pub struct Core {
     pub giphy: Arc<Giphy>,
     pub sounds: Arc<Sounds>,
     pub voice: Voice,
+    /// Music in the call: YouTube and SoundCloud links tocados em grupo.
+    pub music: Arc<crate::music::Music>,
     /// Audio and video attachments being played.
     pub media: crate::media::Media,
     pub prefs: Prefs,
@@ -908,12 +915,25 @@ impl Core {
         crate::devices::set_input(prefs.input_device.as_ref().map(|d| d.id.clone()));
         crate::devices::set_output(prefs.output_device.as_ref().map(|d| d.id.clone()));
         let sounds = Sounds::new(prefs.sounds_off.iter().cloned().collect());
+        let music = crate::music::Music::new(
+            rt.clone(),
+            {
+                let tx = tx.clone();
+                let ctx = ctx.clone();
+                Arc::new(move |text: String| {
+                    let _ = tx.send(Msg::Toast(text));
+                    ctx.request_repaint();
+                })
+            },
+            ctx.clone(),
+        );
         let mut voice = Voice::new(
             rt.clone(),
             api.clone(),
             gw.clone(),
             signals.clone(),
             sounds.clone(),
+            music.clone(),
             ctx.clone(),
             {
                 let tx = tx.clone();
@@ -990,6 +1010,7 @@ impl Core {
             giphy,
             sounds,
             voice,
+            music,
             media,
             prefs,
             e2e,
@@ -2956,6 +2977,13 @@ impl Core {
 
     /// The picker of screens and windows. Their pictures are taken on a
     /// thread of their own and arrive one by one.
+    pub fn open_music(&mut self) {
+        self.open_modal(Modal::Music {
+            link: String::new(),
+        });
+        self.modal_focus = true;
+    }
+
     pub fn open_share(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         let own = self.shell.hwnd();

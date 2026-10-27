@@ -14,7 +14,7 @@ exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-
 
 # The version lives only here: the app, the server and the installer read it.
 [workspace.package]
-version = "0.12.1"
+version = "0.13.0"
 edition = "2024"
 authors = ["Babu Tela"]
 publish = false
@@ -105,7 +105,7 @@ tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "
 # The icons of the annotations' toolbar over my shared screen, drawn from
 # the interface's own SVGs (BetterOffice's draws slides with this one).
 resvg = { version = "0.48.1", default-features = false }
-tokio = { version = "1.53.3", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.3", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 # TURN over TLS, for networks without UDP (the WebRTC stack only speaks it
 # over UDP; see crates/app/src/voice/relay.rs).

@@ -1627,6 +1627,7 @@ fn modal_name(m: &Modal) -> &'static str {
         Modal::ApproveDevice { .. } => "approve-device",
         Modal::NewDevice => "new-device",
         Modal::Security { .. } => "security",
+        Modal::Music { .. } => "music",
     }
 }
 

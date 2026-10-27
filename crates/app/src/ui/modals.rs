@@ -128,6 +128,7 @@ fn body(ui: &mut Ui, core: &mut Core, m: &mut Modal, focus: bool, acts: &mut Act
             items,
             incoming,
         } => share(ui, core, tab, items, incoming, acts),
+        Modal::Music { link } => super::music::modal(ui, core, link, focus, acts),
         Modal::Player { attachment } => {
             super::player::enlarged(ui, core, attachment, acts);
             foot(ui, |ui| {

@@ -13,6 +13,7 @@ pub mod friends;
 mod ink;
 pub mod members;
 pub mod modals;
+pub mod music;
 pub mod player;
 pub mod security;
 pub mod sidebar;

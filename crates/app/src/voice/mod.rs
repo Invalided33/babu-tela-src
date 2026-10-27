@@ -200,16 +200,20 @@ pub struct Voice {
     restarting: bool,
     /// Everyone's strokes over my own shared screen (ink/overlay.rs).
     overlay: Option<ink::overlay::Overlay>,
+    /// Music in the call: shared with Core and the UI.
+    music: Arc<crate::music::Music>,
     ctx: egui::Context,
 }
 
 impl Voice {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rt: tokio::runtime::Handle,
         api: Arc<Api>,
         gw: gateway::Sender,
         signals: Arc<crate::e2e::signals::Signals>,
         sounds: Arc<Sounds>,
+        music: Arc<crate::music::Music>,
         ctx: egui::Context,
         toast: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Voice {
@@ -253,6 +257,7 @@ impl Voice {
             ink: Ink::new(ctx.clone()),
             restarting: false,
             overlay: None,
+            music,
             ctx,
         }
     }
@@ -471,6 +476,15 @@ impl Voice {
         let (pictures, picture_rx) = unbounded_channel();
         let (sound_tx, sound_rx) = unbounded_channel();
         let (screen_sound, screen_sound_rx) = unbounded_channel();
+        // Music in the call: the Opus encoder it runs writes to the same
+        // screen audio sender; the control-channel messages it posts flow
+        // out over music_out_rx. Giving the music module a clone of `cmds`
+        // lets it ask the connections to add the screen audio track as the
+        // song starts.
+        let (music_out_tx, music_out_rx) = unbounded_channel();
+        self.music
+            .activate(me, music_out_tx, screen_sound.clone(), cmds.clone());
+        let music = self.music.clone();
         // Whose screens' sound this side does not take, from the start.
         self.unwatched.clear();
         let _ = cmds.send(rtc::Cmd::ScreenMuted(self.unheard_screens()));
@@ -531,8 +545,17 @@ impl Voice {
                 report,
                 slides,
                 ink,
+                music,
             };
-            rtc::run(ctx, cmd_rx, sound_rx, screen_sound_rx, picture_rx).await;
+            rtc::run(
+                ctx,
+                cmd_rx,
+                sound_rx,
+                screen_sound_rx,
+                picture_rx,
+                music_out_rx,
+            )
+            .await;
             // What the connections sent as they closed (the release of their
             // relay allocations) still reaches the server.
             relay.close().await;
@@ -564,6 +587,7 @@ impl Voice {
         }
         self.sounds.play(cue);
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.music.deactivate();
         if let Some(call) = self.call.take() {
             let _ = call.cmds.send(rtc::Cmd::Close);
             drop(call.sending);
@@ -649,6 +673,10 @@ impl Voice {
                 self.ink.forget_owner(*gone);
             }
         }
+        // The music queue follows the call: the DJ of a song that is no
+        // longer there steps down.
+        let member_list: Vec<i64> = ids.iter().copied().collect();
+        self.music.set_members(&member_list);
         self.present = Some(ids.clone());
         // The screen watched enlarged is gone: every other one is heard
         // again (the call view says the same once it is drawn).
