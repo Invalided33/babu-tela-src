@@ -30,6 +30,18 @@ const HOSTS: &[&str] = &[
 /// yt-dlp sometimes takes a while on YouTube.
 const EXTRACT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Browsers whose cookies yt-dlp can read. Each one is tried in turn when
+/// YouTube asks for a sign-in: the first that has a working YouTube
+/// session unlocks the download. The name is what `yt-dlp
+/// --cookies-from-browser` takes.
+const BROWSERS: &[&str] = &["chrome", "edge", "firefox", "brave", "opera", "vivaldi"];
+
+/// `CREATE_NO_WINDOW` (`winbase.h`): yt-dlp is a console program, and
+/// without it Windows gives it its own console window every time it is
+/// spawned by a program compiled with `windows_subsystem = "windows"`.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// The service the link belongs to (as the user sees it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Service {
@@ -86,54 +98,49 @@ pub fn classify(link: &str) -> Option<Service> {
 }
 
 /// Runs yt-dlp in `-J` (one JSON out) and picks the audio format out of
-/// what came back.
+/// what came back. YouTube asking for a sign-in means the fallback through
+/// the browsers' cookies gets tried, in [`BROWSERS`] order.
 pub async fn extract(link: &str, tools: &Tools) -> Result<Extracted, String> {
     let service = classify(link).ok_or_else(|| "só links do YouTube e do SoundCloud".to_owned())?;
 
-    let mut cmd = Command::new(&tools.yt_dlp);
-    cmd.arg("--dump-single-json")
-        .arg("--no-warnings")
-        .arg("--no-playlist")
-        .arg("--no-call-home")
-        // Don't hang forever on a slow TCP read, and try again a few
-        // times on a transient failure (YouTube may 429 under load, or
-        // a connection may be reset mid-handshake).
-        .arg("--socket-timeout")
-        .arg("15")
-        .arg("--retries")
-        .arg("3")
-        .arg("--extractor-retries")
-        .arg("3")
-        // YouTube's defaults (`tv_samsung`, `visionos`, `web`) are picked
-        // by yt-dlp to avoid the PO Token requirement, and the list moves
-        // as YouTube keeps changing: don't override `player_client` here,
-        // let yt-dlp pick. `formats=missing_pot` still considers audio
-        // formats that normally need a PO Token: the common itag 251
-        // (Opus 160 kb/s) often plays without one, and if it 403s the
-        // fallback picks the next format automatically.
-        .arg("--extractor-args")
-        .arg("youtube:formats=missing_pot")
-        .arg("--format")
-        // Opus/Vorbis first for YouTube (160 kb/s itag 251), then any
-        // audio-only, then best of anything with sound. SoundCloud picks
-        // one of its own.
-        .arg("bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best")
-        .arg("--js-runtimes")
-        .arg(format!("quickjs:{}", qjs_arg(&tools.qjs)))
-        .arg(link);
-    cmd.kill_on_drop(true);
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    let child = cmd.spawn().map_err(|e| format!("yt-dlp: {e}"))?;
-    let out = tokio::time::timeout(EXTRACT_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| "yt-dlp demorou demais".to_owned())?
-        .map_err(|e| format!("yt-dlp: {e}"))?;
-    if !out.status.success() {
-        let msg = String::from_utf8_lossy(&out.stderr);
-        return Err(trimmed_error(&msg));
+    // First try without cookies: for most videos it works, and nobody's
+    // account gets flagged for nothing.
+    let out = run_ytdlp(tools, link, None).await?;
+    let out = if looks_like_sign_in(&out) && service == Service::YouTube {
+        // YouTube asked for a login. One of the browsers has an open
+        // session that unlocks the download; the first that works wins.
+        let original = out.stderr.clone();
+        let mut winner: Option<Run> = None;
+        for browser in BROWSERS {
+            crate::logln!("música: tentando cookies do {browser}");
+            match run_ytdlp(tools, link, Some(browser)).await {
+                // Took: the stream URL is in the stdout.
+                Ok(r) if r.ok => {
+                    winner = Some(r);
+                    break;
+                }
+                // yt-dlp ran but still refused, or the browser is not
+                // there: try the next one.
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        match winner {
+            Some(r) => r,
+            // Nothing worked. The original YouTube error is clearer than
+            // the last browser's "could not find chrome": show that one.
+            None => {
+                return Err(format!(
+                    "YouTube pediu login. Entre no YouTube pelo Chrome, Edge, Firefox, Brave, \
+                     Opera ou Vivaldi e tente de novo ({}).",
+                    trimmed_error(&original)
+                ));
+            }
+        }
+    } else {
+        out
+    };
+    if !out.ok {
+        return Err(trimmed_error(&out.stderr));
     }
 
     let v: Value =
@@ -172,6 +179,81 @@ pub async fn extract(link: &str, tools: &Tools) -> Result<Extracted, String> {
         ext,
         hls,
     })
+}
+
+/// What a single yt-dlp run came back with.
+struct Run {
+    ok: bool,
+    stdout: Vec<u8>,
+    stderr: String,
+}
+
+/// Runs yt-dlp once with the args the music module always uses. When
+/// `browser` is Some, `--cookies-from-browser` is passed too.
+async fn run_ytdlp(tools: &Tools, link: &str, browser: Option<&str>) -> Result<Run, String> {
+    let mut cmd = Command::new(&tools.yt_dlp);
+    cmd.arg("--dump-single-json")
+        .arg("--no-warnings")
+        .arg("--no-playlist")
+        .arg("--no-call-home")
+        // Don't hang forever on a slow TCP read, and try again a few
+        // times on a transient failure (YouTube may 429 under load, or
+        // a connection may be reset mid-handshake).
+        .arg("--socket-timeout")
+        .arg("15")
+        .arg("--retries")
+        .arg("3")
+        .arg("--extractor-retries")
+        .arg("3")
+        // YouTube's defaults (`tv_samsung`, `visionos`, `web`) are picked
+        // by yt-dlp to avoid the PO Token requirement, and the list moves
+        // as YouTube keeps changing: don't override `player_client` here,
+        // let yt-dlp pick. `formats=missing_pot` still considers audio
+        // formats that normally need a PO Token: the common itag 251
+        // (Opus 160 kb/s) often plays without one, and if it 403s the
+        // fallback picks the next format automatically.
+        .arg("--extractor-args")
+        .arg("youtube:formats=missing_pot")
+        .arg("--format")
+        // Opus/Vorbis first for YouTube (160 kb/s itag 251), then any
+        // audio-only, then best of anything with sound. SoundCloud picks
+        // one of its own.
+        .arg("bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best")
+        .arg("--js-runtimes")
+        .arg(format!("quickjs:{}", qjs_arg(&tools.qjs)));
+    if let Some(name) = browser {
+        cmd.arg("--cookies-from-browser").arg(name);
+    }
+    cmd.arg(link);
+    cmd.kill_on_drop(true);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    // No console window: the app runs in `windows_subsystem = "windows"`,
+    // so otherwise Windows gives yt-dlp a console window of its own that
+    // flashes on screen.
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let child = cmd.spawn().map_err(|e| format!("yt-dlp: {e}"))?;
+    let out = tokio::time::timeout(EXTRACT_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| "yt-dlp demorou demais".to_owned())?
+        .map_err(|e| format!("yt-dlp: {e}"))?;
+    Ok(Run {
+        ok: out.status.success(),
+        stdout: out.stdout,
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    })
+}
+
+/// true when the yt-dlp run failed with YouTube's sign-in prompt: the
+/// extractor retries with the browser cookies.
+fn looks_like_sign_in(r: &Run) -> bool {
+    !r.ok
+        && (r.stderr.contains("Sign in to confirm")
+            || r.stderr.contains("sign in to confirm")
+            || r.stderr.contains("Sign in to prove"))
 }
 
 /// A path for yt-dlp's `--js-runtimes quickjs:<path>` argument. On
@@ -221,5 +303,35 @@ mod tests {
         assert_eq!(trimmed_error(s), "Unable to extract");
         let s2 = "yt-dlp exploded";
         assert_eq!(trimmed_error(s2), "yt-dlp exploded");
+    }
+
+    #[test]
+    fn sign_in_prompt_is_recognised() {
+        let r = Run {
+            ok: false,
+            stdout: Vec::new(),
+            stderr: "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies-from-browser".into(),
+        };
+        assert!(looks_like_sign_in(&r));
+    }
+
+    #[test]
+    fn other_failures_are_not_mistaken_for_sign_in() {
+        let r = Run {
+            ok: false,
+            stdout: Vec::new(),
+            stderr: "ERROR: [youtube] abc: Video unavailable".into(),
+        };
+        assert!(!looks_like_sign_in(&r));
+    }
+
+    #[test]
+    fn a_successful_run_is_not_a_sign_in() {
+        let r = Run {
+            ok: true,
+            stdout: b"{}".to_vec(),
+            stderr: String::new(),
+        };
+        assert!(!looks_like_sign_in(&r));
     }
 }

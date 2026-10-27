@@ -763,7 +763,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "babutela"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "arboard",
  "arti-client",
@@ -826,11 +826,11 @@ dependencies = [
 
 [[package]]
 name = "babutela-buildinfo"
-version = "0.13.3"
+version = "0.13.4"
 
 [[package]]
 name = "babutela-denoise"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "realfft",
  "tract-onnx",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "babutela-setup"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "babutela-buildinfo",
  "lzma-rust2",
@@ -11679,7 +11679,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "babutela-buildinfo",
  "babutela-setup",
