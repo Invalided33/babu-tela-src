@@ -466,7 +466,7 @@ where
     let mut written_total: usize = 0;
     // Babu Tela's change (see the top of Cargo.toml): the 10 seconds are
     // for a stall, 10 seconds without a byte, not for the whole body. Below
-    // some 150 KB/s the consensus takes longer than that, and every download
+    // some 70 KB/s the consensus takes longer than that, and every download
     // was given up partway and started again, so the client never
     // bootstrapped. Ten minutes in all is still the most a body may take.
     let idle_timeout = Duration::from_secs(10);

@@ -8,8 +8,8 @@
 # The change, in src/lib.rs (`read_and_decompress`): the 10 seconds a
 # directory download may take now count from the last byte that came, not
 # from the start of the body (ten minutes in all at most). The consensus is
-# a megabyte or two, so with the 10 seconds in all, a client that gets it at
-# less than some 150 KB/s (a slow mobile link, a busy directory cache)
+# some 0.7 MB compressed, so with the 10 seconds in all, a client getting it at
+# less than some 70 KB/s (a slow mobile link, a busy directory cache)
 # gives every download up partway ("Partial response", "directory timed
 # out"), starts it again, and never gets onto the Tor network: what a debug
 # build of the app did here, its cells handled at some 70 KB/s. The code's
