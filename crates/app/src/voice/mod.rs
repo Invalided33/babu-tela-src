@@ -168,6 +168,10 @@ pub struct Voice {
     share_audio: bool,
     /// Whose screen's sound I silenced here.
     screen_muted: HashSet<i64>,
+    /// Whose screen share I stopped watching ("Parar de assistir"): neither
+    /// its picture nor its sound comes, until I watch it again or the share
+    /// ends.
+    unwatched: HashSet<i64>,
     /// Whose screen the call view shows enlarged: its sound is the only
     /// one that comes while it is.
     screen_focus: Option<i64>,
@@ -233,6 +237,7 @@ impl Voice {
             source: None,
             share_audio: true,
             screen_muted: HashSet::new(),
+            unwatched: HashSet::new(),
             screen_focus: None,
             present: None,
             streaming: HashSet::new(),
@@ -467,7 +472,8 @@ impl Voice {
         let (sound_tx, sound_rx) = unbounded_channel();
         let (screen_sound, screen_sound_rx) = unbounded_channel();
         // Whose screens' sound this side does not take, from the start.
-        let _ = cmds.send(rtc::Cmd::ScreenMuted(self.screen_muted.clone()));
+        self.unwatched.clear();
+        let _ = cmds.send(rtc::Cmd::ScreenMuted(self.unheard_screens()));
         let io = Arc::new(std::sync::Mutex::new(None));
         // The call keeps these too, to reopen the devices.
         let (sound, devices) = (sound_tx.clone(), io.clone());
@@ -573,6 +579,7 @@ impl Voice {
         }
         self.present = None;
         self.streaming.clear();
+        self.unwatched.clear();
         self.screen_focus = None;
         self.speaking.clear();
         self.spoke.clear();
@@ -650,6 +657,16 @@ impl Voice {
             .is_some_and(|uid| !streaming.contains(&uid))
         {
             self.set_screen_focus(None);
+        }
+        // A share I stopped watching ended: the next one is watched again.
+        let unwatched = self.unwatched.len();
+        self.unwatched.retain(|uid| streaming.contains(uid));
+        if self.unwatched.len() != unwatched
+            && let Some(call) = &self.call
+        {
+            let _ = call
+                .cmds
+                .send(rtc::Cmd::ScreenMuted(self.unheard_screens()));
         }
         self.streaming = streaming;
         for gone in users.iter().filter(|u| u.video.is_none()) {
@@ -952,12 +969,53 @@ impl Voice {
         if changed && let Some(call) = &self.call {
             let _ = call
                 .cmds
-                .send(rtc::Cmd::ScreenMuted(self.screen_muted.clone()));
+                .send(rtc::Cmd::ScreenMuted(self.unheard_screens()));
         }
     }
 
     pub fn gains(&self, uid: i64) -> Gains {
         self.shared.gains(uid)
+    }
+
+    /// Whose screens' sound does not come here: those silenced, and those
+    /// not watched.
+    fn unheard_screens(&self) -> HashSet<i64> {
+        self.screen_muted.union(&self.unwatched).copied().collect()
+    }
+
+    /// Whether I watch `uid`'s screen share (the default, for every share).
+    pub fn watching(&self, uid: i64) -> bool {
+        !self.unwatched.contains(&uid)
+    }
+
+    /// "Parar de assistir" (`on` false) or "Assistir transmissão" (true)
+    /// `uid`'s screen share, here only. Not watched, its sound stops coming
+    /// at once, and its picture once the call view stops asking for it
+    /// (stage.rs leaves it out); a share that starts later is watched.
+    pub fn set_watching(&mut self, uid: i64, on: bool) {
+        let changed = if on {
+            self.unwatched.remove(&uid)
+        } else {
+            self.streaming.contains(&uid) && self.unwatched.insert(uid)
+        };
+        if !changed {
+            return;
+        }
+        if !on && self.screen_focus == Some(uid) {
+            self.set_screen_focus(None);
+        }
+        if let Some(call) = &self.call {
+            let _ = call
+                .cmds
+                .send(rtc::Cmd::ScreenMuted(self.unheard_screens()));
+        }
+    }
+
+    /// Whose screen shares I stopped watching, for the tests' report.
+    pub fn unwatched(&self) -> Vec<i64> {
+        let mut out: Vec<i64> = self.unwatched.iter().copied().collect();
+        out.sort_unstable();
+        out
     }
 
     /// The call view, every frame: whose screen it shows enlarged (None:

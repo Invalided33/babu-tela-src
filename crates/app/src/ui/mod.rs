@@ -125,7 +125,8 @@ fn time_stamp(ctx: &egui::Context) {
 fn app(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
     // In fullscreen, only the call view is shown: no rail, no sidebar, no
-    // members panel, no titlebar. The voice buttons are in the stage bar.
+    // members panel, no titlebar. The call's buttons float over it
+    // (stage.rs `fullscreen_bar`).
     if !fullscreen {
         let width = ui.ctx().content_rect().width();
         Panel::left("rail")
@@ -501,12 +502,12 @@ fn keys(ctx: &egui::Context, core: &mut Core, acts: &mut Acts) {
     if !ctx.input(|i| i.key_pressed(Key::Escape)) {
         return;
     }
-    let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+    let fullscreen = stage::is_fullscreen(ctx);
     if core.voice.ink().active().is_some() {
         // Annotating: Escape stops it first (ui/ink.rs).
         core.voice.ink().close();
     } else if fullscreen {
-        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
+        stage::set_fullscreen(ctx, false);
     } else if core.pop.is_some() {
         acts.later(|c| c.pop = None);
     } else if core.editing.is_some() {

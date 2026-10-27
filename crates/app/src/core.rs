@@ -2647,6 +2647,11 @@ impl Core {
         self.users.values().any(|u| u.username == name)
     }
 
+    /// Whoever has this user name, of the people the app knows.
+    pub fn user_named(&self, username: &str) -> Option<&User> {
+        self.users.values().find(|u| u.username == username)
+    }
+
     /// Whether `content` mentions me: "@name" at the start or after a space,
     /// not followed by another character that names can have.
     pub fn mentions_me(&self, content: &str) -> bool {

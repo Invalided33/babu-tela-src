@@ -20,7 +20,7 @@ use super::Acts;
 use super::widgets::{self, Button, Ib};
 use crate::core::Core;
 use crate::icons::Icon;
-use crate::model::VoiceUser;
+use crate::model::{Video, VoiceUser};
 use crate::slides::{Owner, View};
 use crate::theme::{self, ACCENT, BG2, BG3, BG4, FAINT, MUTED, RADIUS_SM, TEXT, WARN};
 use crate::voice::plan::{self, Layer};
@@ -846,16 +846,15 @@ fn viewer_bar(
         if Button::ghost("Ver pessoas").small().show(ui).clicked() {
             ui.data_mut(|d| d.insert_temp(set_aside(cid), v.id));
         }
-        // Fullscreen — just the icon.
-        let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let fs_icon = if fullscreen {
-            Icon::ZoomOut
+        // Fullscreen, the same way as the call view's (stage.rs).
+        let fullscreen = super::stage::is_fullscreen(ui.ctx());
+        let (fs_icon, fs_tip) = if fullscreen {
+            (Icon::ZoomOut, "Sair da tela cheia (Esc)")
         } else {
-            Icon::Expand
+            (Icon::Expand, "Tela cheia")
         };
-        if widgets::icon_button(ui, fs_icon, 28.0, Ib::Bare, "").clicked() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        if widgets::icon_button(ui, fs_icon, 28.0, Ib::Bare, fs_tip).clicked() {
+            super::stage::set_fullscreen(ui.ctx(), !fullscreen);
         }
         if away {
             back = Button::primary("Voltar ao apresentador")
@@ -952,8 +951,10 @@ fn people(
             let origin = ui.cursor().min + vec2(((rect.width() - total) / 2.0).max(0.0), 0.0);
             for (i, u) in users.iter().enumerate() {
                 let r = Rect::from_min_size(origin + vec2(i as f32 * (w + GAP), 0.0), vec2(w, h));
+                // A screen I stopped watching is not asked for here either.
                 let theirs = u.user_id != me
                     && u.video.is_some()
+                    && (u.video != Some(Video::Screen) || core.voice.watching(u.user_id))
                     && ui.is_rect_visible(r)
                     && wanted.len() < plan::MAX_VIDEOS;
                 if theirs {

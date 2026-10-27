@@ -250,11 +250,14 @@ fn mentions(text: &str, style: Style, known: &dyn Fn(&str) -> bool, out: &mut Ve
 pub enum Click {
     Link(String),
     Spoiler(usize),
+    /// A mention, by the user name it has in the text.
+    Mention(String),
 }
 
 enum Target {
     Link(String),
     Spoiler(usize),
+    Mention(String),
 }
 
 /// One stretch of a paragraph, laid out on its own: text (selectable, with
@@ -282,11 +285,14 @@ fn run_for<'a>(ui: &Ui, runs: &'a mut Vec<Run>, hidden: Option<usize>) -> &'a mu
 }
 
 /// Draws a parsed message. `revealed(i)` says whether spoiler `i` was
-/// clicked open; `edited` adds the small "(editado)" at the end.
+/// clicked open; `named(user)` is the name a mention of that user name
+/// shows ("@Beto" for "@beto"), as Discord does, if there is one; `edited`
+/// adds the small "(editado)" at the end.
 pub fn show(
     ui: &mut Ui,
     pieces: &[Piece],
     revealed: &dyn Fn(usize) -> bool,
+    named: &dyn Fn(&str) -> Option<String>,
     edited: bool,
 ) -> Option<Click> {
     let mut click = None;
@@ -315,10 +321,19 @@ pub fn show(
                 let hidden = style.spoiler.filter(|s| !revealed(*s));
                 let run = run_for(ui, &mut runs, hidden);
                 let start = run.job.text.len();
-                run.job.append(text, 0.0, format(style, revealed));
+                let user = style.mention.then(|| text.trim_start_matches('@'));
+                let label = user.and_then(named).map(|n| format!("@{n}"));
+                run.job.append(
+                    label.as_deref().unwrap_or(text),
+                    0.0,
+                    format(style, revealed),
+                );
                 if let Some(s) = style.spoiler {
                     run.targets
                         .push((start..run.job.text.len(), Target::Spoiler(s)));
+                } else if let Some(user) = user {
+                    run.targets
+                        .push((start..run.job.text.len(), Target::Mention(user.to_owned())));
                 }
             }
             Piece::Code(code) => {
@@ -459,6 +474,7 @@ fn flush(ui: &mut Ui, runs: &mut Vec<Run>, click: &mut Option<Click>) {
         let clicked = hit.map(|(_, target)| match target {
             Target::Link(u) => Click::Link(u.clone()),
             Target::Spoiler(s) => Click::Spoiler(*s),
+            Target::Mention(user) => Click::Mention(user.clone()),
         });
         if let Some(last) = galley.rows.last() {
             let row = last.rect();

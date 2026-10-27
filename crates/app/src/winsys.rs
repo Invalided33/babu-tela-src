@@ -398,6 +398,47 @@ pub fn is_maximized(hwnd: isize) -> bool {
     !hwnd.is_null() && unsafe { IsZoomed(hwnd) != 0 }
 }
 
+/// Where the window, its drawable area and its screen are, in the screen's
+/// pixels, for the tests: whether fullscreen really covers the screen.
+pub fn geometry(hwnd: isize) -> serde_json::Value {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+    let rect = |r: RECT| serde_json::json!([r.left, r.top, r.right, r.bottom]);
+    let hwnd = hwnd as HWND;
+    if hwnd.is_null() {
+        return serde_json::Value::Null;
+    }
+    // SAFETY: read-only queries on a window handle, into plain structs of
+    // integers (all zeros is valid), the monitor's with its size set.
+    unsafe {
+        let mut window: RECT = std::mem::zeroed();
+        GetWindowRect(hwnd, &mut window);
+        let mut client: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut client);
+        let mut corner = POINT { x: 0, y: 0 };
+        ClientToScreen(hwnd, &mut corner);
+        let client = RECT {
+            left: corner.x,
+            top: corner.y,
+            right: corner.x + client.right,
+            bottom: corner.y + client.bottom,
+        };
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
+        serde_json::json!({
+            "window": rect(window),
+            "client": rect(client),
+            "monitor": rect(info.rcMonitor),
+            "work": rect(info.rcWork),
+            "zoomed": IsZoomed(hwnd) != 0,
+        })
+    }
+}
+
 /// Brings the window back and in front of the others. Windows only lets an
 /// app take the foreground in some situations, so it is briefly made
 /// topmost first, which is what the earlier versions did too.

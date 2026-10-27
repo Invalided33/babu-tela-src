@@ -2,13 +2,15 @@
 //! they share, and the call's buttons underneath.
 
 use egui::{
-    Align, Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Layout, Margin, Panel, Rect,
-    ScrollArea, Sense, Stroke, Ui, Vec2, pos2, vec2,
+    Align, Align2, Area, Color32, CornerRadius, CursorIcon, Frame, Id, Layout, Margin, Order,
+    Panel, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2, ViewportCommand, pos2,
+    vec2,
 };
 
 use std::collections::{HashMap, HashSet};
 
 use super::Acts;
+use super::sidebar::{ALL_BUTTONS, STAGE_BUTTONS};
 use super::widgets::{self, Button, Ib};
 use crate::core::{Core, Pop, PopKind};
 use crate::icons::{self, Icon};
@@ -17,6 +19,10 @@ use crate::theme::{self, *};
 use crate::voice::plan::{self, Candidate, Layer};
 
 const GAP: f32 = 10.0;
+
+/// In fullscreen, the call's buttons stay this long after the pointer last
+/// moved (seconds), then hide, the pointer with them.
+const BAR_FOR: f32 = 3.0;
 
 /// The tiles' shape (a video's), and the narrowest they get: with more
 /// people than fit at that size, the grid scrolls.
@@ -109,6 +115,51 @@ pub fn set_zoom(ctx: &egui::Context, cid: i64, uid: Option<i64>) {
     });
 }
 
+/// Whose video the call view of `cid` shows enlarged, for the tests.
+pub fn zoomed(ctx: &egui::Context, cid: i64) -> Option<i64> {
+    ctx.data(|d| d.get_temp(zoom_id(cid)))
+}
+
+pub fn is_fullscreen(ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))
+}
+
+/// Whether the window was maximized as fullscreen began: it is again once
+/// fullscreen ends.
+fn was_maximized_id() -> Id {
+    Id::unique("fullscreen-was-maximized")
+}
+
+/// Into fullscreen or out of it: the call view's buttons, a presentation's,
+/// Escape. A maximized window kept the taskbar over it in fullscreen: winit
+/// holds a maximized window without a frame to the screen's work area (the
+/// screen without the taskbar), and Windows only puts the taskbar under a
+/// fullscreen window that is not maximized (Chromium restores its window
+/// first for the same reason). So the window is restored before, and
+/// maximized again after.
+pub fn set_fullscreen(ctx: &egui::Context, on: bool) {
+    let (fullscreen, maximized) = ctx.input(|i| {
+        let v = i.viewport();
+        (v.fullscreen.unwrap_or(false), v.maximized.unwrap_or(false))
+    });
+    if on == fullscreen {
+        return;
+    }
+    if on {
+        ctx.data_mut(|d| d.insert_temp(was_maximized_id(), maximized));
+        if maximized {
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
+        }
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+    } else {
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
+        let again = ctx.data_mut(|d| d.remove_temp::<bool>(was_maximized_id()));
+        if again == Some(true) {
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+        }
+    }
+}
+
 pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let Some((s, c)) = core.current_channel() else {
         return;
@@ -118,6 +169,9 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let users: Vec<VoiceUser> = s.in_voice(cid).to_vec();
     let joined = core.voice.channel_id() == Some(cid);
     let show_members = core.show_members;
+    // Fullscreen is the call alone: no header, no bar (its buttons float
+    // over it), the enlarged video edge to edge.
+    let fullscreen = is_fullscreen(ui.ctx());
     // A presentation fills the view, unless it was set aside for the
     // people's tiles (until it is brought back, or another one begins).
     let presentation = if joined {
@@ -128,66 +182,68 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let aside: Option<u32> = ui.data(|d| d.get_temp(super::slides::set_aside(cid)));
     let set_aside = presentation.as_ref().is_some_and(|p| aside == Some(p.id));
     let slides = presentation.filter(|p| aside != Some(p.id));
-    super::header(ui, "stage-head", |ui| {
-        ui.add(Icon::Speaker.tinted(MUTED));
-        ui.label(
-            egui::RichText::new(&name)
-                .font(theme::bold(15.0))
-                .color(TEXT),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let style = if show_members { Ib::Normal } else { Ib::Bare };
-            if widgets::icon_button(ui, Icon::Users, 34.0, style, "Lista de membros").clicked() {
-                acts.later(|c| c.show_members = !c.show_members);
-            }
-            // Fullscreen toggle in the stage header — just the icon.
-            let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-            let fs_icon = if fullscreen {
-                Icon::ZoomOut
-            } else {
-                Icon::Expand
-            };
-            if widgets::icon_button(ui, fs_icon, 34.0, Ib::Bare, "").clicked() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-            }
-            if set_aside
-                && Button::primary("Ver apresentação")
-                    .small()
-                    .show(ui)
-                    .clicked()
-            {
-                ui.data_mut(|d| d.remove::<u32>(super::slides::set_aside(cid)));
-            }
-        });
-    });
-    Panel::bottom("stagebar")
-        .resizable(false)
-        .show_separator_line(false)
-        .frame(Frame::new().fill(BG0).inner_margin(Margin::same(12)))
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                if joined {
-                    let width = 5.0 * 48.0 + 4.0 * GAP;
-                    ui.allocate_ui_with_layout(
-                        vec2(width, 48.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| super::sidebar::voice_buttons(ui, core, acts, 48.0, false),
-                    );
-                } else if may_join {
-                    if Button::primary("Entrar na chamada").show(ui).clicked() {
-                        acts.later(move |c| c.join_voice(cid));
-                    }
-                } else {
-                    ui.label(
-                        egui::RichText::new("Você não tem permissão para entrar neste canal.")
-                            .color(MUTED),
-                    );
+    if !fullscreen {
+        super::header(ui, "stage-head", |ui| {
+            ui.add(Icon::Speaker.tinted(MUTED));
+            ui.label(
+                egui::RichText::new(&name)
+                    .font(theme::bold(15.0))
+                    .color(TEXT),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let style = if show_members { Ib::Normal } else { Ib::Bare };
+                if widgets::icon_button(ui, Icon::Users, 34.0, style, "Lista de membros").clicked()
+                {
+                    acts.later(|c| c.show_members = !c.show_members);
+                }
+                if widgets::icon_button(ui, Icon::Expand, 34.0, Ib::Bare, "Tela cheia").clicked() {
+                    set_fullscreen(ui.ctx(), true);
+                }
+                if set_aside
+                    && Button::primary("Ver apresentação")
+                        .small()
+                        .show(ui)
+                        .clicked()
+                {
+                    ui.data_mut(|d| d.remove::<u32>(super::slides::set_aside(cid)));
                 }
             });
         });
+        Panel::bottom("stagebar")
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(Frame::new().fill(BG0).inner_margin(Margin::same(12)))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    if joined {
+                        // The microphone and the sound are by the gear in
+                        // the side panel; here, what goes with the call.
+                        let n = STAGE_BUTTONS.len() as f32;
+                        ui.allocate_ui_with_layout(
+                            vec2(n * 48.0 + (n - 1.0) * GAP, 48.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| super::sidebar::voice_buttons(ui, core, acts, 48.0, STAGE_BUTTONS),
+                        );
+                    } else if may_join {
+                        if Button::primary("Entrar na chamada").show(ui).clicked() {
+                            acts.later(move |c| c.join_voice(cid));
+                        }
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Você não tem permissão para entrar neste canal.")
+                                .color(MUTED),
+                        );
+                    }
+                });
+            });
+    }
+    let frame = if fullscreen {
+        Frame::new().fill(Color32::BLACK)
+    } else {
+        Frame::new().fill(BG0).inner_margin(Margin::same(16))
+    };
     let wanted = egui::CentralPanel::default()
-        .frame(Frame::new().fill(BG0).inner_margin(Margin::same(16)))
+        .frame(frame)
         .show(ui, |ui| {
             if let Some(p) = &slides {
                 return super::slides::draw(ui, core, p, &users, cid, acts);
@@ -202,6 +258,19 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             tiles(ui, core, &users, joined, cid, acts)
         })
         .inner;
+    if fullscreen {
+        // Someone else's screen, enlarged and watched: the bar can stop it.
+        let zoomed: Option<i64> = ui.data(|d| d.get_temp(zoom_id(cid)));
+        let screen = zoomed.filter(|uid| {
+            slides.is_none()
+                && *uid != core.me_id()
+                && core.voice.watching(*uid)
+                && users
+                    .iter()
+                    .any(|u| u.user_id == *uid && u.video == Some(Video::Screen))
+        });
+        fullscreen_bar(ui, core, acts, cid, joined, may_join, screen);
+    }
     if joined {
         // While videos are shown, the view says so at least twice a second,
         // or their senders would take it for gone (the frames that the
@@ -212,16 +281,96 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         }
         core.voice.want_videos(wanted);
         // A screen enlarged is the one heard (a presentation over the
-        // view leaves none enlarged).
+        // view leaves none enlarged, and one not watched is not heard).
         let zoomed: Option<i64> = ui.data(|d| d.get_temp(zoom_id(cid)));
         let focus = zoomed.filter(|uid| {
             slides.is_none()
+                && core.voice.watching(*uid)
                 && users
                     .iter()
                     .any(|u| u.user_id == *uid && u.video == Some(Video::Screen))
         });
         core.voice.set_screen_focus(focus);
     }
+}
+
+/// The call's buttons over the call in fullscreen: all of them (the side
+/// panel is not on screen), "Parar de assistir" while someone's screen is
+/// enlarged, and the way out of fullscreen. There for a few seconds after
+/// the pointer moves and while it is on them; then they hide, the pointer
+/// too, and the picture is all that shows.
+#[allow(clippy::too_many_arguments)]
+fn fullscreen_bar(
+    ui: &Ui,
+    core: &Core,
+    acts: &mut Acts,
+    cid: i64,
+    joined: bool,
+    may_join: bool,
+    screen: Option<i64>,
+) {
+    let ctx = ui.ctx().clone();
+    let id = Id::unique("fullscreen-bar");
+    let still = ctx.input(|i| i.pointer.time_since_last_movement());
+    // Where it was on the last frame: the pointer on it keeps it.
+    let last: Option<Rect> = ctx.data(|d| d.get_temp(id));
+    let pointer = ctx.input(|i| i.pointer.hover_pos());
+    let on_bar = matches!((last, pointer), (Some(r), Some(p)) if r.expand(12.0).contains(p));
+    // A menu or a dialog open over the call (the share picker, someone's
+    // volume) keeps it, and the pointer.
+    if still >= BAR_FOR && !on_bar && core.pop.is_none() && core.modal.is_none() {
+        ctx.set_cursor_icon(CursorIcon::None);
+        return;
+    }
+    if !on_bar {
+        // To hide it on time; any movement before that brings a frame.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(
+            (BAR_FOR - still).max(0.05),
+        ));
+    }
+    let shown = Area::new(id)
+        .order(Order::Foreground)
+        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -28.0))
+        .show(&ctx, |ui| {
+            Frame::new()
+                .fill(Color32::from_black_alpha(0xc8))
+                .stroke(Stroke::new(1.0, BG3))
+                .corner_radius(CornerRadius::same(36))
+                .inner_margin(Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if joined {
+                            super::sidebar::voice_buttons(ui, core, acts, 48.0, ALL_BUTTONS);
+                        } else if may_join
+                            && Button::primary("Entrar na chamada").show(ui).clicked()
+                        {
+                            acts.later(move |c| c.join_voice(cid));
+                        }
+                        ui.add_space(6.0);
+                        if let Some(uid) = screen
+                            && Button::danger("Parar de assistir").show(ui).clicked()
+                        {
+                            set_zoom(ui.ctx(), cid, None);
+                            set_fullscreen(ui.ctx(), false);
+                            acts.later(move |c| c.voice.set_watching(uid, false));
+                        }
+                        let out = widgets::icon_button_sized(
+                            ui,
+                            Icon::ZoomOut,
+                            48.0,
+                            icons::LARGE,
+                            Ib::Normal,
+                            "Sair da tela cheia (Esc)",
+                        );
+                        crate::smoke::target(|| "sair-da-tela-cheia".into(), out.rect);
+                        if out.clicked() {
+                            set_fullscreen(ui.ctx(), false);
+                        }
+                    });
+                });
+        });
+    let rect = shown.response.rect;
+    ctx.data_mut(|d| d.insert_temp(id, rect));
 }
 
 /// Lays out everyone's tile, and says which copy of whose video to
@@ -236,10 +385,17 @@ fn tiles(
     cid: i64,
     acts: &mut Acts,
 ) -> HashMap<i64, Layer> {
-    // A clicked video fills the whole stage until clicked again.
+    // A clicked video fills the whole stage until clicked again (a screen
+    // no longer watched does not).
     let zoom_id = zoom_id(cid);
     let zoomed: Option<i64> = ui.data(|d| d.get_temp(zoom_id));
-    let zoomed = zoomed.filter(|uid| users.iter().any(|u| u.user_id == *uid && u.video.is_some()));
+    let zoomed = zoomed.filter(|uid| {
+        users.iter().any(|u| {
+            u.user_id == *uid
+                && u.video.is_some()
+                && (u.video != Some(Video::Screen) || core.voice.watching(*uid))
+        })
+    });
     let shown: Vec<&VoiceUser> = match zoomed {
         Some(uid) => users.iter().filter(|u| u.user_id == uid).collect(),
         None => users.iter().collect(),
@@ -261,11 +417,17 @@ fn tiles(
         .show(ui, |ui| {
             let origin = ui.cursor().min.to_vec2();
             let rects: Vec<Rect> = layout.rects.iter().map(|r| r.translate(origin)).collect();
+            // A screen I stopped watching is not asked for: its picture
+            // stops coming.
             let candidates: Vec<Candidate> = shown
                 .iter()
                 .zip(&rects)
                 .filter(|(v, r)| {
-                    joined && v.video.is_some() && v.user_id != me && ui.is_rect_visible(**r)
+                    joined
+                        && v.video.is_some()
+                        && v.user_id != me
+                        && (v.video != Some(Video::Screen) || core.voice.watching(v.user_id))
+                        && ui.is_rect_visible(**r)
                 })
                 .map(|(v, _)| Candidate {
                     uid: v.user_id,
@@ -299,16 +461,29 @@ fn tiles(
                     let enlarged = zoomed == Some(v.user_id);
                     super::ink::over(ui, core, page, picture, *rect, enlarged, acts);
                 }
+                let uid = v.user_id;
+                let here = zoomed == Some(uid);
                 if click.zoom {
-                    let next = if zoomed == Some(v.user_id) {
-                        None
-                    } else {
-                        Some(v.user_id)
-                    };
-                    set_zoom(ui.ctx(), cid, next);
+                    set_zoom(ui.ctx(), cid, (!here).then_some(uid));
+                }
+                // The tile's own fullscreen: this video, enlarged, alone on
+                // the screen (the floating bar has the way back).
+                if click.fullscreen {
+                    set_zoom(ui.ctx(), cid, Some(uid));
+                    set_fullscreen(ui.ctx(), true);
+                }
+                if click.stop {
+                    if here {
+                        set_zoom(ui.ctx(), cid, None);
+                        set_fullscreen(ui.ctx(), false);
+                    }
+                    acts.later(move |c| c.voice.set_watching(uid, false));
+                }
+                if click.watch {
+                    acts.later(move |c| c.voice.set_watching(uid, true));
                 }
                 if let Some(at) = click.menu {
-                    open_person(acts, v.user_id, at);
+                    open_person(acts, uid, at);
                 }
             }
             ui.allocate_space(vec2(avail.x, layout.height));
@@ -336,6 +511,53 @@ pub(super) struct TileClick {
     pub(super) menu: Option<egui::Pos2>,
     /// Where their picture shows, when it does (for the annotations).
     pub(super) picture: Option<Rect>,
+    /// The fullscreen button over their video.
+    pub(super) fullscreen: bool,
+    /// "Parar de assistir" over someone's screen.
+    pub(super) stop: bool,
+    /// "Assistir transmissão" on a screen not watched.
+    pub(super) watch: bool,
+}
+
+/// A button over a video (`label` beside the icon, if any), dark so it
+/// reads on any picture, its right edge at `right`.
+fn over_button(
+    ui: &mut Ui,
+    id: Id,
+    right: egui::Pos2,
+    icon: Icon,
+    label: Option<&str>,
+    tip: &str,
+) -> Response {
+    const H: f32 = 32.0;
+    let galley = label.map(|l| {
+        ui.painter()
+            .layout_no_wrap(l.to_owned(), theme::bold(13.0), TEXT)
+    });
+    let w = galley.as_ref().map_or(H, |g| H + g.size().x + 10.0);
+    let rect = Rect::from_min_max(pos2(right.x - w, right.y - H), right);
+    let resp = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text(tip);
+    let fill = if resp.hovered() {
+        Color32::from_black_alpha(0xf0)
+    } else {
+        Color32::from_black_alpha(0xb4)
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(RADIUS_MD), fill);
+    let ink = if resp.hovered() { TEXT } else { MUTED };
+    let icon_at = Rect::from_center_size(
+        pos2(rect.left() + H / 2.0, rect.center().y),
+        Vec2::splat(icons::SIZE),
+    );
+    icon.image(icons::SIZE, ink).paint_at(ui, icon_at);
+    if let Some(g) = galley {
+        let at = pos2(rect.left() + H - 2.0, rect.center().y - g.size().y / 2.0);
+        ui.painter().galley(at, g, ink);
+    }
+    resp
 }
 
 /// One person. `video`: their picture is shown, when there is one (it is
@@ -343,12 +565,23 @@ pub(super) struct TileClick {
 pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: bool) -> TileClick {
     let u = core.user(v.user_id);
     let resp = ui.interact(rect, Id::unique(("tile", v.user_id)), Sense::click());
+    crate::smoke::target(|| format!("quadro:{}", u.username), rect);
     let mut click = TileClick::default();
     if v.user_id != core.me_id() && resp.secondary_clicked() {
         click.menu = Some(resp.interact_pointer_pos().unwrap_or(rect.center()));
     }
     let gains = core.voice.gains(v.user_id);
-    let radius = CornerRadius::same(12);
+    // Someone else's screen share, and whether I watch it.
+    let their_screen = v.user_id != core.me_id() && v.video == Some(Video::Screen);
+    let unwatched = their_screen && !core.voice.watching(v.user_id);
+    // Enlarged in fullscreen: edge to edge, with no rounded corners.
+    let screen_rect = ui.ctx().content_rect();
+    let edge_to_edge = is_fullscreen(ui.ctx()) && rect.width() >= screen_rect.width() - 1.0;
+    let radius = if edge_to_edge {
+        CornerRadius::ZERO
+    } else {
+        CornerRadius::same(12)
+    };
     // `radial-gradient(circle at 50% 40%, var(--bg3), var(--bg2))`, as
     // rings that stop short of the corners so the rounding stays clean,
     // and cut at the tile's edge (a wide tile is shorter than they are
@@ -379,16 +612,70 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
                 .paint_at(ui, at);
             click.picture = Some(at);
             core.voice.frame_shown(v.user_id);
-            let resp = resp
-                .on_hover_cursor(CursorIcon::ZoomIn)
-                .on_hover_text("Clique para ampliar");
-            click.zoom = resp.clicked();
+            // Edge to edge in fullscreen, a click changes nothing (the
+            // floating bar has the way out), so none is lost by accident.
+            if !edge_to_edge {
+                let resp = resp
+                    .on_hover_cursor(CursorIcon::ZoomIn)
+                    .on_hover_text("Clique para ampliar");
+                click.zoom = resp.clicked();
+            }
+            // Over the picture while the pointer is on it, as Discord has
+            // them on a stream: fullscreen, and for someone else's screen,
+            // to stop watching it. (Not on the small tiles under a
+            // presentation, which have no room, nor edge to edge in
+            // fullscreen, where the floating bar has both.)
+            if ui.rect_contains_pointer(rect) && rect.height() >= 140.0 && !edge_to_edge {
+                let name = u.username.clone();
+                let mut right = rect.right_bottom() - vec2(10.0, 10.0);
+                let id = Id::unique(("tile-fullscreen", v.user_id));
+                let full = over_button(ui, id, right, Icon::Expand, None, "Tela cheia");
+                crate::smoke::target(|| format!("tela-cheia:{name}"), full.rect);
+                click.fullscreen = full.clicked();
+                if their_screen {
+                    right.x = full.rect.left() - 6.0;
+                    let id = Id::unique(("tile-stop", v.user_id));
+                    let stop = over_button(
+                        ui,
+                        id,
+                        right,
+                        Icon::X,
+                        Some("Parar de assistir"),
+                        "Parar de assistir a transmissão (a imagem e o som param de vir)",
+                    );
+                    crate::smoke::target(|| format!("parar-de-assistir:{name}"), stop.rect);
+                    click.stop = stop.clicked();
+                }
+            }
         }
         None => {
             // Smaller in the small tiles under a presentation.
             let side = 84.0_f32.min(rect.height() * 0.6);
-            let av = Rect::from_center_size(rect.center(), Vec2::splat(side));
+            // A screen not watched: who shares it, and the way back to it
+            // (when the tile has room for the button).
+            let offer = unwatched && rect.height() >= 150.0;
+            let center = if offer {
+                rect.center() - vec2(0.0, 22.0)
+            } else {
+                rect.center()
+            };
+            let av = Rect::from_center_size(center, Vec2::splat(side));
             widgets::paint_avatar(ui, core, &u, av, false, BG3);
+            if offer {
+                let row = Rect::from_center_size(
+                    pos2(rect.center().x, av.bottom() + 26.0),
+                    vec2(rect.width(), 32.0),
+                );
+                let mut child = ui.new_child(
+                    UiBuilder::new()
+                        .max_rect(row)
+                        .layout(Layout::top_down(Align::Center)),
+                );
+                click.watch = Button::primary("Assistir transmissão")
+                    .small()
+                    .show(&mut child)
+                    .clicked();
+            }
         }
     }
     if core.voice.speaking(v.user_id) {

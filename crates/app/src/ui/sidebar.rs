@@ -579,139 +579,102 @@ fn channel_row(ui: &mut Ui, core: &Core, s: &Server, c: &Channel, manage: bool, 
 
 // ---------------------------------------------------------------- the call and me
 
-/// The five buttons of a call: microphone, sound, camera, screen, hang up.
-/// `side` is 34 in the side panel and 48 (round) under the call view.
-pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, grow: bool) {
+/// One of a call's buttons.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CallButton {
+    Mic,
+    Sound,
+    Camera,
+    Screen,
+    Hang,
+}
+
+/// The microphone and the sound, by the gear under "Voz conectada", as
+/// Discord has them.
+pub const SOUND_BUTTONS: &[CallButton] = &[CallButton::Mic, CallButton::Sound];
+
+/// What stays under the call view: the camera, the screen and hanging up
+/// (the microphone and the sound are in the side panel).
+pub const STAGE_BUTTONS: &[CallButton] =
+    &[CallButton::Camera, CallButton::Screen, CallButton::Hang];
+
+/// Everything, for fullscreen, where the side panel is not on screen.
+pub const ALL_BUTTONS: &[CallButton] = &[
+    CallButton::Mic,
+    CallButton::Sound,
+    CallButton::Camera,
+    CallButton::Screen,
+    CallButton::Hang,
+];
+
+/// A call's buttons, `side` px each: round grey ones of 48 under the call
+/// view, bare ones of 32 in the side panel, by the gear.
+pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which: &[CallButton]) {
     let mute = core.voice.mute();
     let deaf = core.voice.deaf();
     let video = core.voice.video();
     let presenting = core.voice.presenting();
-    let icon_size = if side >= 48.0 {
-        icons::LARGE
-    } else {
-        icons::SIZE
-    };
-    let gap = if side >= 48.0 { 10.0 } else { 6.0 };
-    let width = if grow {
-        ((ui.available_width() - gap * 4.0) / 5.0).max(side)
-    } else {
-        side
-    };
-    let items: [(Icon, Ib, &str); 5] = [
-        (
-            Icon::mic(mute),
-            if mute { Ib::Off } else { Ib::Normal },
-            "Microfone",
-        ),
-        (
-            Icon::head(deaf),
-            if deaf { Ib::Off } else { Ib::Normal },
-            "Áudio",
-        ),
-        (
-            Icon::Video,
-            if video == Some(Video::Camera) {
-                Ib::On
-            } else {
-                Ib::Normal
-            },
-            "Câmera",
-        ),
-        if presenting {
-            (Icon::Presentation, Ib::On, "Parar de apresentar")
-        } else {
-            (
+    let big = side >= 48.0;
+    let icon_size = if big { icons::LARGE } else { icons::SIZE };
+    let plain = if big { Ib::Normal } else { Ib::Bare };
+    ui.spacing_mut().item_spacing.x = if big { 10.0 } else { 2.0 };
+    for &button in which {
+        let (icon, style, tip) = match button {
+            CallButton::Mic => (
+                Icon::mic(mute),
+                if mute { Ib::Off } else { plain },
+                "Microfone",
+            ),
+            CallButton::Sound => (
+                Icon::head(deaf),
+                if deaf { Ib::Off } else { plain },
+                "Áudio",
+            ),
+            CallButton::Camera => (
+                Icon::Video,
+                if video == Some(Video::Camera) {
+                    Ib::On
+                } else {
+                    plain
+                },
+                "Câmera",
+            ),
+            CallButton::Screen if presenting => (Icon::Presentation, Ib::On, "Parar de apresentar"),
+            CallButton::Screen => (
                 Icon::Screen,
                 if video == Some(Video::Screen) {
                     Ib::On
                 } else {
-                    Ib::Normal
+                    plain
                 },
                 "Compartilhar tela",
-            )
-        },
-        (Icon::Hang, Ib::Hang, "Desconectar"),
-    ];
-    ui.spacing_mut().item_spacing.x = gap;
-    for (i, (icon, style, tip)) in items.into_iter().enumerate() {
-        let clicked = if grow {
-            // In the side panel the five share the width, as `flex: 1` did.
-            let (rect, _) = ui.allocate_exact_size(vec2(width, side), Sense::hover());
-            wide_icon_button(ui, icon, rect, style, tip, icon_size).clicked()
-        } else {
-            widgets::icon_button_sized(ui, icon, side, icon_size, style, tip).clicked()
+            ),
+            CallButton::Hang => (Icon::Hang, Ib::Hang, "Desconectar"),
         };
-        if clicked {
-            match i {
-                0 => acts.later(Core::toggle_mute),
-                1 => acts.later(|c| c.voice.toggle_deaf()),
-                2 => acts.later(move |c| {
-                    let next = (video != Some(Video::Camera)).then_some(Video::Camera);
-                    c.voice.set_video(next);
-                }),
-                // Sharing or presenting already: stop. Otherwise pick a
-                // screen, a window or a presentation.
-                3 => acts.later(move |c| {
-                    if presenting {
-                        c.voice.stop_presenting();
-                    } else if video == Some(Video::Screen) {
-                        c.voice.share(None);
-                    } else {
-                        c.open_share();
-                    }
-                }),
-                _ => acts.later(|c| c.voice.leave(false, Cue::Leave)),
-            }
+        if !widgets::icon_button_sized(ui, icon, side, icon_size, style, tip).clicked() {
+            continue;
+        }
+        match button {
+            CallButton::Mic => acts.later(Core::toggle_mute),
+            CallButton::Sound => acts.later(|c| c.voice.toggle_deaf()),
+            CallButton::Camera => acts.later(move |c| {
+                let next = (video != Some(Video::Camera)).then_some(Video::Camera);
+                c.voice.set_video(next);
+            }),
+            // Sharing or presenting already: stop. Otherwise pick a screen,
+            // a window or a presentation.
+            CallButton::Screen => acts.later(move |c| {
+                if presenting {
+                    c.voice.stop_presenting();
+                } else if video == Some(Video::Screen) {
+                    c.voice.share(None);
+                } else {
+                    c.open_share();
+                }
+            }),
+            CallButton::Hang => acts.later(|c| c.voice.leave(false, Cue::Leave)),
         }
     }
-}
-
-fn wide_icon_button(
-    ui: &mut Ui,
-    icon: Icon,
-    rect: Rect,
-    style: Ib,
-    tip: &str,
-    icon_size: f32,
-) -> Response {
-    let resp = ui
-        .interact(rect, ui.scope_id().with(("wide-ib", tip)), Sense::click())
-        .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text(tip);
-    let hovered = resp.hovered();
-    let danger_soft = Color32::from_rgba_unmultiplied(0xef, 0x5f, 0x67, 0x22);
-    let radius = CornerRadius::same(RADIUS_MD);
-    let fg = match (style, hovered) {
-        (Ib::On, _) => {
-            widgets::paint_gradient(ui, rect, radius, 1.0);
-            ACCENT_INK
-        }
-        (Ib::Off, _) => {
-            ui.painter().rect_filled(rect, radius, danger_soft);
-            DANGER
-        }
-        (Ib::Hang, false) => {
-            ui.painter().rect_filled(rect, radius, danger_soft);
-            DANGER
-        }
-        (Ib::Hang, true) => {
-            ui.painter().rect_filled(rect, radius, DANGER);
-            Color32::WHITE
-        }
-        (_, true) => {
-            ui.painter().rect_filled(rect, radius, BG4);
-            TEXT
-        }
-        (_, false) => {
-            ui.painter().rect_filled(rect, radius, BG3);
-            MUTED
-        }
-    };
-    icon.image(icon_size, fg).paint_at(
-        ui,
-        Rect::from_center_size(rect.center(), Vec2::splat(icon_size)),
-    );
-    resp
 }
 
 fn voice_panel(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
@@ -746,26 +709,37 @@ fn voice_panel(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             })
         });
     }
-    ui.add_space(8.0);
-    ui.horizontal(|ui| voice_buttons(ui, core, acts, 34.0, true));
 }
 
+/// Me at the bottom of the side panel, with the gear; in a call, the
+/// microphone and the sound go by it (the other buttons are under the call
+/// view).
 fn user_panel(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let Some(me) = core.me.clone() else { return };
+    let in_call = core.voice_location().is_some();
+    const SIDE: f32 = 32.0;
+    let buttons = if in_call { 1 + SOUND_BUTTONS.len() } else { 1 };
+    let room = buttons as f32 * SIDE + (buttons - 1) as f32 * 2.0 + 10.0;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         let mut shown = me.clone();
         shown.status = me.status.public();
         widgets::avatar(ui, core, &shown, 34.0, true, BG0);
         ui.vertical(|ui| {
-            ui.set_width(ui.available_width() - 44.0);
+            ui.set_width((ui.available_width() - room).max(24.0));
             ui.spacing_mut().item_spacing.y = 0.0;
             widgets::ellipsis(ui, me.name(), theme::bold(14.0), TEXT);
             widgets::ellipsis(ui, me.status.label(), theme::tiny(), MUTED);
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if widgets::icon_button(ui, Icon::Gear, 34.0, Ib::Bare, "Configurações").clicked() {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if widgets::icon_button(ui, Icon::Gear, SIDE, Ib::Bare, "Configurações").clicked() {
                 acts.later(Core::open_settings);
+            }
+            if in_call {
+                // Right to left: the sound, then the microphone.
+                let order: Vec<CallButton> = SOUND_BUTTONS.iter().rev().copied().collect();
+                voice_buttons(ui, core, acts, SIDE, &order);
             }
         });
     });

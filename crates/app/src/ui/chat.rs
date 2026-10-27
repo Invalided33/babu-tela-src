@@ -482,7 +482,34 @@ fn composer(
     let mut send = false;
     let mut paste = false;
     let id = composer_id(cid);
-    Frame::new()
+    // The "@" list, as it was on the last frame: while it shows, the
+    // arrows, Enter, Tab and Esc are its own, taken before the box sees
+    // them (Enter would send the message).
+    let mut picker: Picker = ui.data(|d| d.get_temp(picker_id(cid))).unwrap_or_default();
+    let keys = if picker.open && ui.memory(|m| m.has_focus(id)) {
+        take_picker_keys(ui)
+    } else {
+        PickerKeys::default()
+    };
+    // A click on the list must not take the focus from the box first: the
+    // list would close before the click lands.
+    let list_layer = egui::LayerId::new(egui::Order::Foreground, mention_list_id(cid));
+    let on_list = picker.open
+        && ui
+            .ctx()
+            .pointer_interact_pos()
+            .and_then(|p| ui.ctx().layer_id_at(p))
+            == Some(list_layer);
+    let surrender = ui.ctx().options(|o| o.input_options.surrender_focus_on);
+    if on_list {
+        ui.ctx().options_mut(|o| {
+            o.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
+        });
+    }
+    // What the list shows this frame: where the "@" is, up to the cursor,
+    // and who it may mean.
+    let mut mention: Option<(usize, usize, Vec<User>)> = None;
+    let composer_box = Frame::new()
         .fill(BG3)
         .corner_radius(CornerRadius::same(RADIUS))
         .show(ui, |ui| {
@@ -541,10 +568,38 @@ fn composer(
             }
             let stickers = core.giphy.enabled();
             let draft = core.drafts.entry(cid).or_default();
-            let row = input_line(ui, draft, id, cid, place, may_attach, stickers);
+            let row = input_line(ui, draft, id, cid, place, may_attach, stickers, picker.open);
             let resp = &row.text;
             if focus {
                 resp.request_focus();
+            }
+            // An "@" just before the cursor: who it may mean, as typed so
+            // far (and not closed with Esc).
+            let text = core.drafts.get(&cid).cloned().unwrap_or_default();
+            let cursor = TextEdit::load_state(ui.ctx(), id)
+                .and_then(|s| s.cursor.char_range())
+                .map_or(text.chars().count(), |r| r.primary.index.0);
+            let word = (resp.has_focus() || on_list)
+                .then(|| mention_at(&text, cursor))
+                .flatten();
+            if keys.dismiss {
+                picker.dismissed.clone_from(&word);
+            }
+            if picker.for_word != word {
+                picker.selected = 0;
+                picker.for_word.clone_from(&word);
+            }
+            if let Some((at, query)) = word.filter(|w| picker.dismissed.as_ref() != Some(w)) {
+                let people = mention_people(core);
+                let found: Vec<User> = mention_matches(&people, &query, core.me_id())
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                if !found.is_empty() {
+                    let n = found.len();
+                    picker.selected = (picker.selected + keys.down + n - keys.up % n) % n;
+                    mention = Some((at, cursor, found));
+                }
             }
             if resp.changed() {
                 acts.later(move |c| c.typed(cid));
@@ -577,6 +632,31 @@ fn composer(
                 acts.later(move |c| c.open_emoji(PopKind::Emoji, anchor));
             }
         });
+    ui.ctx()
+        .options_mut(|o| o.input_options.surrender_focus_on = surrender);
+    // The list over the composer, and who was picked in it: by Enter or
+    // Tab (then it is not drawn this frame), or by a click.
+    let mut open = false;
+    if let Some((at, cursor, found)) = mention {
+        let mut chosen = keys.accept.then_some(picker.selected);
+        if chosen.is_none() {
+            let rect = composer_box.response.rect;
+            let (clicked, hovered) =
+                mention_list(ui.ctx(), core, cid, rect, &found, picker.selected);
+            if let Some(i) = hovered {
+                picker.selected = i;
+            }
+            chosen = clicked;
+            open = clicked.is_none();
+        }
+        if let Some(u) = chosen.and_then(|i| found.get(i)) {
+            insert_mention(ui.ctx(), core, cid, at, cursor, &u.username);
+            picker.dismissed = None;
+            picker.selected = 0;
+        }
+    }
+    picker.open = open;
+    ui.data_mut(|d| d.insert_temp(picker_id(cid), picker));
     if send {
         acts.later(Core::send_message);
     }
@@ -585,6 +665,261 @@ fn composer(
             c.paste_files();
         });
     }
+}
+
+// ---------------------------------------------------------------- @mentions
+
+/// At most this many people in the "@" list.
+const MENTION_ROWS: usize = 8;
+const MENTION_ROW_H: f32 = 40.0;
+
+/// The "@" list between frames: who is picked in it (the arrows move it),
+/// for which "@…" that was, the "@…" it was closed for with Esc (it stays
+/// closed until that changes), and whether it showed on the last frame.
+#[derive(Clone, Default)]
+struct Picker {
+    selected: usize,
+    for_word: Option<(usize, String)>,
+    dismissed: Option<(usize, String)>,
+    open: bool,
+}
+
+fn picker_id(cid: i64) -> Id {
+    Id::unique(("mention-picker", cid))
+}
+
+/// The "@" list of conversation `cid` as the last frame left it, for the
+/// tests' report: whether it shows, who is picked, and whether the
+/// composer has the focus.
+pub fn mention_report(ctx: &egui::Context, cid: i64) -> serde_json::Value {
+    let picker: Picker = ctx.data(|d| d.get_temp(picker_id(cid))).unwrap_or_default();
+    serde_json::json!({
+        "open": picker.open,
+        "selected": picker.selected,
+        "word": picker.for_word.map(|(_, w)| w),
+        "focused": ctx.memory(|m| m.has_focus(composer_id(cid))),
+    })
+}
+
+fn mention_list_id(cid: i64) -> Id {
+    Id::unique(("mention-list", cid))
+}
+
+/// The keys the "@" list takes while it shows.
+#[derive(Default)]
+struct PickerKeys {
+    down: usize,
+    up: usize,
+    /// Enter or Tab.
+    accept: bool,
+    dismiss: bool,
+}
+
+/// Takes the list's keys out of this frame's input (only those pressed
+/// without Shift or the like: Shift+Enter still breaks the line).
+fn take_picker_keys(ui: &Ui) -> PickerKeys {
+    fn take(i: &mut egui::InputState, key: Key) -> usize {
+        let mut n = 0;
+        i.events.retain(|e| {
+            let hit = matches!(
+                e,
+                egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                    if *k == key && modifiers.is_none()
+            );
+            n += usize::from(hit);
+            !hit
+        });
+        n
+    }
+    ui.input_mut(|i| PickerKeys {
+        down: take(i, Key::ArrowDown),
+        up: take(i, Key::ArrowUp),
+        accept: take(i, Key::Enter) + take(i, Key::Tab) > 0,
+        dismiss: take(i, Key::Escape) > 0,
+    })
+}
+
+/// The "@" typed just before `cursor` (at the start or after a space), and
+/// what follows it up to the cursor, if that is what a name can have
+/// (letters, digits, _ and .): where the "@" is, in characters, and that
+/// text.
+fn mention_at(text: &str, cursor: usize) -> Option<(usize, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let cursor = cursor.min(chars.len());
+    let mut i = cursor;
+    while i > 0 {
+        let c = chars[i - 1];
+        if c == '@' {
+            let at = i - 1;
+            if at > 0 && !chars[at - 1].is_whitespace() {
+                return None;
+            }
+            return Some((at, chars[i..cursor].iter().collect()));
+        }
+        if !(c.is_alphanumeric() || c == '_' || c == '.') || cursor - i >= 32 {
+            return None;
+        }
+        i -= 1;
+    }
+    None
+}
+
+/// Who "@" followed by `query` may mean among `people` (never me): those
+/// whose user name or a word of whose name starts with it, then those in
+/// whose names it is (case and accents aside); online first, then by name.
+fn mention_matches<'a>(people: &'a [User], query: &str, me: i64) -> Vec<&'a User> {
+    let q = crate::emoji::fold(query);
+    let mut found: Vec<(u8, bool, String, &User)> = people
+        .iter()
+        // Shorter user names are not read as mentions (markdown.rs).
+        .filter(|u| u.id != me && u.username.len() >= 3)
+        .filter_map(|u| {
+            let name = crate::emoji::fold(u.name());
+            let starts = q.is_empty()
+                || u.username.starts_with(&q)
+                || name
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|w| w.starts_with(&q));
+            let rank = if starts {
+                0
+            } else if u.username.contains(&q) || name.contains(&q) {
+                1
+            } else {
+                return None;
+            };
+            let away = u.status.public() == Status::Offline;
+            Some((rank, away, name, u))
+        })
+        .collect();
+    found.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
+    found
+        .into_iter()
+        .take(MENTION_ROWS)
+        .map(|(_, _, _, u)| u)
+        .collect()
+}
+
+/// Who can be mentioned in the conversation on screen: the server's
+/// members, or the other person of a direct one.
+fn mention_people(core: &Core) -> Vec<User> {
+    if let Some((s, _)) = core.current_channel() {
+        return s.members.clone();
+    }
+    core.current_dm()
+        .map(|d| vec![d.user.clone()])
+        .unwrap_or_default()
+}
+
+/// Puts "@user " where the "@…" being typed is (from character `at` to
+/// `cursor`), the cursor after it. The text keeps the user name, which is
+/// what every copy of the app (the older ones too) looks for.
+fn insert_mention(
+    ctx: &egui::Context,
+    core: &mut Core,
+    cid: i64,
+    at: usize,
+    cursor: usize,
+    username: &str,
+) {
+    let id = composer_id(cid);
+    let draft = core.drafts.entry(cid).or_default();
+    let byte = |n: usize| draft.char_indices().nth(n).map_or(draft.len(), |(b, _)| b);
+    let (start, end) = (byte(at), byte(cursor.max(at)));
+    let put = format!("@{username} ");
+    draft.replace_range(start..end, &put);
+    let mut state = TextEdit::load_state(ctx, id).unwrap_or_default();
+    let caret = egui::text::CCursor::new(egui::text::CharIndex(at + put.chars().count()));
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(caret)));
+    state.store(ctx, id);
+    core.focus_composer = true;
+}
+
+/// The people an "@" may mean, over the composer (`above`) and as wide as
+/// it, `selected` lit. Gives whoever was clicked, and whoever the pointer
+/// moved onto (which picks them, as the arrows do).
+fn mention_list(
+    ctx: &egui::Context,
+    core: &Core,
+    cid: i64,
+    above: Rect,
+    found: &[User],
+    selected: usize,
+) -> (Option<usize>, Option<usize>) {
+    const HEAD: f32 = 28.0;
+    let height = HEAD + found.len() as f32 * MENTION_ROW_H + 8.0;
+    let (mut clicked, mut hovered) = (None, None);
+    egui::Area::new(mention_list_id(cid))
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos2(above.left(), above.top() - height - 8.0))
+        .show(ctx, |ui| {
+            Frame::new()
+                .fill(BG1)
+                .stroke(Stroke::new(1.0, BG4))
+                .corner_radius(CornerRadius::same(RADIUS))
+                .inner_margin(Margin::same(4))
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 6],
+                    blur: 20,
+                    spread: 0,
+                    color: Color32::from_black_alpha(0x90),
+                })
+                .show(ui, |ui| {
+                    ui.set_width(above.width() - 8.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let (head, _) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), HEAD), Sense::hover());
+                    ui.painter().text(
+                        pos2(head.left() + 8.0, head.center().y),
+                        Align2::LEFT_CENTER,
+                        "MEMBROS",
+                        theme::bold(11.0),
+                        FAINT,
+                    );
+                    let moving = ui.input(|i| i.pointer.is_moving());
+                    for (i, u) in found.iter().enumerate() {
+                        let (rect, resp) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), MENTION_ROW_H),
+                            Sense::click(),
+                        );
+                        let resp = resp.on_hover_cursor(CursorIcon::PointingHand);
+                        crate::smoke::target(|| format!("mencao:{}", u.username), rect);
+                        let lit = i == selected;
+                        if lit {
+                            ui.painter()
+                                .rect_filled(rect, CornerRadius::same(RADIUS_SM), BG3);
+                        }
+                        let av = Rect::from_min_size(
+                            pos2(rect.left() + 8.0, rect.center().y - 13.0),
+                            Vec2::splat(26.0),
+                        );
+                        widgets::paint_avatar(ui, core, u, av, true, if lit { BG3 } else { BG1 });
+                        let name = ui.painter().layout_no_wrap(
+                            u.name().to_owned(),
+                            theme::bold(14.0),
+                            TEXT,
+                        );
+                        let at = pos2(av.right() + 10.0, rect.center().y - name.size().y / 2.0);
+                        let after = at.x + name.size().x + 8.0;
+                        ui.painter().galley(at, name, TEXT);
+                        ui.painter().text(
+                            pos2(after, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!("@{}", u.username),
+                            theme::small(),
+                            MUTED,
+                        );
+                        if resp.hovered() && moving {
+                            hovered = Some(i);
+                        }
+                        if resp.clicked() {
+                            clicked = Some(i);
+                        }
+                    }
+                });
+        });
+    (clicked, hovered)
 }
 
 /// The composer's line: what was laid out, for its callers (and the test
@@ -602,6 +937,9 @@ struct Line {
 /// the last line of text. The text goes first, at its place, so its height
 /// is known before the buttons go next to it; a plain row would put the
 /// buttons by the scroll area's own minimum height (64 px), not the text's.
+/// `picking`: the "@" list shows, and Tab and Esc are its own (the box
+/// keeps the focus).
+#[allow(clippy::too_many_arguments)]
 fn input_line(
     ui: &mut Ui,
     draft: &mut String,
@@ -610,6 +948,7 @@ fn input_line(
     place: &str,
     may_attach: bool,
     stickers: bool,
+    picking: bool,
 ) -> Line {
     const BUTTON: f32 = 34.0;
     const GAP: f32 = 4.0;
@@ -631,6 +970,12 @@ fn input_line(
                 .font(theme::body())
                 .frame(Frame::new().inner_margin(Margin::symmetric(4, 8)))
                 .return_key(KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter));
+            let filter = edit.get_event_filter();
+            let edit = edit.event_filter(egui::EventFilter {
+                tab: filter.tab || picking,
+                escape: filter.escape || picking,
+                ..filter
+            });
             let slot = Rect::from_min_size(
                 pos2(full.left() + left, full.top()),
                 vec2(width, MAX_HEIGHT),
@@ -1156,11 +1501,18 @@ fn message(
                         let shown = if open { m.content.as_str() } else { start };
                         let pieces = markdown::parse(shown, &|n| core.known_name(n));
                         let revealed = |i: usize| core.spoilers.contains(&(mid, i));
-                        match markdown::show(ui, &pieces, &revealed, m.edited.is_some()) {
+                        let named = |user: &str| core.user_named(user).map(|u| u.name().to_owned());
+                        match markdown::show(ui, &pieces, &revealed, &named, m.edited.is_some()) {
                             Some(Click::Link(url)) => open_external(url),
                             Some(Click::Spoiler(i)) => acts.later(move |c| {
                                 c.spoilers.insert((mid, i));
                             }),
+                            // A mention opens that person's profile.
+                            Some(Click::Mention(user)) => {
+                                if let Some(uid) = core.user_named(&user).map(|u| u.id) {
+                                    acts.later(move |c| c.open_modal(Modal::Profile { uid }));
+                                }
+                            }
                             None => {}
                         }
                         if long {
@@ -1648,7 +2000,16 @@ mod tests {
                 let mut text = draft.to_owned();
                 let frame = Frame::new().show(ui, |ui| {
                     ui.set_width(600.0);
-                    input_line(ui, &mut text, composer_id(1), 1, "Conversar", true, true)
+                    input_line(
+                        ui,
+                        &mut text,
+                        composer_id(1),
+                        1,
+                        "Conversar",
+                        true,
+                        true,
+                        false,
+                    )
                 });
                 out = Some((frame.response.rect, frame.inner));
             });

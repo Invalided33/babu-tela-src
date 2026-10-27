@@ -774,6 +774,32 @@ impl Smoke {
                         .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
                 }
             }
+            // maximizar: the window maximized, as it opens outside the
+            // tests; maximizar:off, back to its size.
+            ("maximizar", off) => {
+                core.ctx
+                    .send_viewport_cmd(egui::ViewportCommand::Maximized(off != "off"));
+                return Duration::from_secs(1);
+            }
+            // tela-cheia:on|off: the call view's fullscreen button.
+            ("tela-cheia", on) => {
+                crate::ui::stage::set_fullscreen(&core.ctx, on == "on");
+                return Duration::from_secs(2);
+            }
+            // parar-de-assistir:<user name> and assistir:<user name>: the
+            // buttons on their screen share's tile.
+            ("parar-de-assistir" | "assistir", who) => {
+                match core
+                    .users
+                    .values()
+                    .find(|u| u.username == who)
+                    .map(|u| u.id)
+                {
+                    Some(uid) => core.voice.set_watching(uid, verb == "assistir"),
+                    None => self.misses.push(step.to_owned()),
+                }
+                return Duration::from_secs(2);
+            }
             // share:camera, share:screen (the main one), or
             // share:window:<part of its title>.
             ("share", kind) => {
@@ -1184,6 +1210,17 @@ impl Smoke {
                         "slides": core.voice.slides().report(),
                         "ink": core.voice.ink_report(),
                         "direct": core.direct.report(),
+                        "unwatched": core.voice.unwatched(),
+                        "unreadHot": core.total_hot(),
+                        "fullscreen": core.ctx.input(|i| i.viewport().fullscreen),
+                        "geometry": core
+                            .shell
+                            .hwnd()
+                            .map_or(serde_json::Value::Null, crate::winsys::geometry),
+                        "draft": core.view.channel().and_then(|c| core.drafts.get(&c)),
+                        "mentionList": core.view.channel().map(|cid| {
+                            crate::ui::chat::mention_report(&core.ctx, cid)
+                        }),
                     }),
                 );
             }
@@ -1442,6 +1479,21 @@ impl Smoke {
         report["googleWaiting"] = json!(core.google.is_some());
         report["authCard"] = json!((core.phase == Phase::Auth).then_some("google"));
         report["maximized"] = json!(core.shell.hwnd().map(crate::winsys::is_maximized));
+        report["fullscreen"] = json!(core.ctx.input(|i| i.viewport().fullscreen));
+        report["unwatched"] = json!(core.voice.unwatched());
+        report["draft"] = json!(core.view.channel().and_then(|c| core.drafts.get(&c)));
+        report["mentionList"] = core.view.channel().map_or(serde_json::Value::Null, |cid| {
+            crate::ui::chat::mention_report(&core.ctx, cid)
+        });
+        report["zoomed"] = json!(
+            core.view
+                .channel()
+                .and_then(|cid| crate::ui::stage::zoomed(&core.ctx, cid))
+        );
+        report["geometry"] = core
+            .shell
+            .hwnd()
+            .map_or(serde_json::Value::Null, crate::winsys::geometry);
         report["noise"] = core.voice.noise_report();
         report["slides"] = core.voice.slides().report();
         report["direct"] = core.direct.report();

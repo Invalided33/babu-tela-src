@@ -1639,7 +1639,8 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
                             ui.label(egui::RichText::new("anexo").italics().color(MUTED));
                         } else {
                             let pieces = markdown::parse(&r.message.content, &|n| core.known_name(n));
-                            if let Some(markdown::Click::Link(url)) = markdown::show(ui, &pieces, &|_| true, false) {
+                            let named = |user: &str| core.user_named(user).map(|u| u.name().to_owned());
+                            if let Some(markdown::Click::Link(url)) = markdown::show(ui, &pieces, &|_| true, &named, false) {
                                 super::chat::open_external(url);
                             }
                         }
