@@ -95,7 +95,24 @@ pub async fn extract(link: &str, tools: &Tools) -> Result<Extracted, String> {
         .arg("--no-warnings")
         .arg("--no-playlist")
         .arg("--no-call-home")
-        .arg("--no-check-certificates")
+        // Don't hang forever on a slow TCP read, and try again a few
+        // times on a transient failure (YouTube may 429 under load, or
+        // a connection may be reset mid-handshake).
+        .arg("--socket-timeout")
+        .arg("15")
+        .arg("--retries")
+        .arg("3")
+        .arg("--extractor-retries")
+        .arg("3")
+        // YouTube's defaults (`tv_samsung`, `visionos`, `web`) are picked
+        // by yt-dlp to avoid the PO Token requirement, and the list moves
+        // as YouTube keeps changing: don't override `player_client` here,
+        // let yt-dlp pick. `formats=missing_pot` still considers audio
+        // formats that normally need a PO Token: the common itag 251
+        // (Opus 160 kb/s) often plays without one, and if it 403s the
+        // fallback picks the next format automatically.
+        .arg("--extractor-args")
+        .arg("youtube:formats=missing_pot")
         .arg("--format")
         // Opus/Vorbis first for YouTube (160 kb/s itag 251), then any
         // audio-only, then best of anything with sound. SoundCloud picks
