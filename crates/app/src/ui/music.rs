@@ -26,6 +26,12 @@ pub fn modal(ui: &mut Ui, core: &mut Core, link: &mut String, focus: bool, acts:
 
     let view = core.music.view();
     let extracting = core.music.extracting();
+    // Keep the elapsed clock ticking: without this egui would only redraw
+    // when the mouse moved, and the time on screen would freeze.
+    if !view.items.is_empty() && view.state == State::Playing {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(200));
+    }
     now_playing(ui, &view, acts, core);
     coming_up(ui, &view, acts, core);
     ui.add_space(10.0);

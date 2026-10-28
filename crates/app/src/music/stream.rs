@@ -13,15 +13,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use super::extractor::Extracted;
 use symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;
 use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
-use tokio::sync::mpsc::UnboundedSender;
-
-use super::extractor::Extracted;
 
 /// 48 kHz stereo, matching the voice encoder.
 pub const RATE: u32 = 48_000;
@@ -42,7 +40,7 @@ pub struct Pcm {
 /// is dropped.
 pub async fn play(
     track: Extracted,
-    pcm: UnboundedSender<Pcm>,
+    pcm: tokio::sync::mpsc::Sender<Pcm>,
     stop: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let bytes = if track.hls {
@@ -288,12 +286,10 @@ impl Resampler {
     }
 }
 
-/// Each PCM chunk is 10 ms of stereo, so the decoder paces the output at
-/// that rate: without this the whole song would land in the mixer's buffer
-/// at once (its `MAX_BUFFER` is 100 ms), the DJ would hear a split-second
-/// of music and nothing more, and the other side would see RTP timestamps
-/// jumping ahead of real time.
-const CHUNK_MS: u64 = 10;
+/// Each PCM chunk is 10 ms of stereo. The encoder in music/mod.rs paces
+/// the output at that rate; the decoder itself runs free into a bounded
+/// `pcm` channel so that during a pause the memory does not grow.
+pub const CHUNK_MS: u64 = 10;
 
 /// How many `CHUNK_MS` chunks go in a burst before pacing starts. The
 /// local mixer waits for `PeerAudio::PRIME` (60 ms of stereo) to be
@@ -301,12 +297,12 @@ const CHUNK_MS: u64 = 10;
 /// make the DJ hear the song; a lead above `TRIM_ABOVE` (another 30 ms)
 /// would make the mixer start trimming quiet stretches. 70 ms clears
 /// both.
-const LEAD_CHUNKS: u64 = 7;
+pub const LEAD_CHUNKS: u64 = 7;
 
 fn decode(
     data: Vec<u8>,
     ext: &str,
-    pcm: &UnboundedSender<Pcm>,
+    pcm: &tokio::sync::mpsc::Sender<Pcm>,
     stop: &AtomicBool,
 ) -> Result<(), String> {
     let source = Box::new(VecCursor::new(data)) as Box<dyn MediaSource>;
@@ -347,13 +343,9 @@ fn decode(
     let mut raw: Vec<f32> = Vec::new();
     let mut stereo: Vec<f32> = Vec::new();
 
-    // Pace the output at real time. The deadline for chunk `i` to leave
-    // is `started_at + i * CHUNK_MS`: the decoder sleeps until then
-    // before sending, so no burst of chunks overflows the receiver's
-    // jitter buffer and the DJ hears the song in real time too.
-    let started_at = std::time::Instant::now();
-    let mut chunks_out: u64 = 0;
-
+    // The decoder runs free: the bounded `pcm` channel (500 chunks ~ 5 s)
+    // blocks it when the encoder is behind. During a pause the encoder
+    // stops reading and the decoder parks here on `blocking_send`.
     loop {
         if stop.load(Ordering::Relaxed) {
             break;
@@ -388,30 +380,19 @@ fn decode(
 
         while pending.len() >= CHUNK * 2 {
             let chunk: Vec<f32> = pending.drain(..CHUNK * 2).collect();
-            // Hold on until this chunk's slot in real time, so the local
-            // mixer and the peers' jitter buffers do not drown. The first
-            // `LEAD_CHUNKS` chunks go in a burst to prime both.
-            let deadline = started_at
-                + std::time::Duration::from_millis(
-                    chunks_out.saturating_sub(LEAD_CHUNKS) * CHUNK_MS,
-                );
-            if let Some(wait) = deadline.checked_duration_since(std::time::Instant::now()) {
-                std::thread::sleep(wait);
-            }
             if stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            if pcm.send(Pcm { samples: chunk }).is_err() {
+            if pcm.blocking_send(Pcm { samples: chunk }).is_err() {
                 return Ok(());
             }
-            chunks_out += 1;
         }
     }
     // The last partial chunk, padded with silence so it still carries 10
     // ms of time.
     if !pending.is_empty() && !stop.load(Ordering::Relaxed) {
         pending.resize(CHUNK * 2, 0.0);
-        let _ = pcm.send(Pcm { samples: pending });
+        let _ = pcm.blocking_send(Pcm { samples: pending });
     }
     Ok(())
 }
@@ -525,7 +506,7 @@ mod tests {
         // Hand `decode` a flag set to stop before anything is read; it
         // should return at once, without needing a real codec in the data.
         let stop = AtomicBool::new(true);
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<Pcm>(1);
         // An empty Vec will not probe (no symphonia hint matches), but
         // the stop flag is checked before the probe. Give an invalid Vec
         // and expect decode to short-circuit after `stop` is seen.
