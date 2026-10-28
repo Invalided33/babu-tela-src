@@ -574,3 +574,123 @@ fn thread_id_hash() -> u64 {
     use std::hash::BuildHasher;
     std::collections::hash_map::RandomState::new().hash_one(std::thread::current().id())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voice::audio::{AudioShared, Packet, PeerAudio};
+    use std::sync::atomic::AtomicBool;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    /// A non-silent 10 ms stereo chunk (alternating, so the Opus encoder
+    /// never treats it as DTX silence and drops it).
+    fn loud_chunk() -> Pcm {
+        let samples = (0..stream::CHUNK * 2)
+            .map(|i| if i % 2 == 0 { 0.3 } else { -0.3 })
+            .collect();
+        Pcm { samples }
+    }
+
+    fn a_music() -> (Arc<Music>, Arc<AudioShared>, tokio::runtime::Runtime) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let music = Music::new(
+            rt.handle().clone(),
+            Arc::new(|_: String| {}),
+            egui::Context::default(),
+        );
+        let audio = Arc::new(AudioShared::default());
+        let (out_tx, _out_rx) = unbounded_channel();
+        let (act_sp, _act_sp_rx) = unbounded_channel();
+        let (cmd_tx, _cmd_rx) = unbounded_channel();
+        // Leak the receivers so the senders stay open for the test.
+        std::mem::forget(_out_rx);
+        std::mem::forget(_act_sp_rx);
+        std::mem::forget(_cmd_rx);
+        music.activate(5, out_tx, act_sp, cmd_tx, audio.clone());
+        (music, audio, rt)
+    }
+
+    #[test]
+    fn the_dj_hears_its_own_music_and_peers_get_opus() {
+        let (music, audio, _rt) = a_music();
+        let local: Arc<PeerAudio> = audio.screen_peer(5);
+        let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Pcm>(500);
+        let (sp_tx, mut sp_rx) = unbounded_channel::<Packet>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
+
+        // 30 chunks (300 ms) then close the channel.
+        let feeder = std::thread::spawn(move || {
+            for _ in 0..30 {
+                if pcm_tx.blocking_send(loud_chunk()).is_err() {
+                    break;
+                }
+            }
+        });
+        paced_encoder(
+            sp_tx,
+            &mut pcm_rx,
+            &stop,
+            &paused,
+            &local,
+            music,
+            "song".into(),
+        );
+        feeder.join().unwrap();
+
+        // The DJ's own mixer buffer got the music (this is what was
+        // silent before: the PCM only went to the encoder, never here).
+        assert!(local.queued() > 0, "DJ heard nothing");
+        // The peers' track got Opus packets.
+        assert!(sp_rx.try_recv().is_ok(), "no Opus for the peers");
+    }
+
+    #[test]
+    fn a_pause_holds_the_music_without_losing_it() {
+        let (music, audio, _rt) = a_music();
+        let local = audio.screen_peer(9);
+        let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Pcm>(500);
+        let (sp_tx, mut sp_rx) = unbounded_channel::<Packet>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(true)); // start paused
+        let stop_t = stop.clone();
+        let paused_t = paused.clone();
+
+        let feeder = std::thread::spawn(move || {
+            for _ in 0..30 {
+                if pcm_tx.blocking_send(loud_chunk()).is_err() {
+                    break;
+                }
+            }
+            // Keep the channel open so the encoder parks on the pause,
+            // not on an empty closed channel.
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        });
+        let local_t = local.clone();
+        let player = std::thread::spawn(move || {
+            paced_encoder(
+                sp_tx,
+                &mut pcm_rx,
+                &stop_t,
+                &paused_t,
+                &local_t,
+                music,
+                "s".into(),
+            );
+        });
+
+        // While paused, nothing should have been emitted.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(sp_rx.try_recv().is_err(), "played while paused");
+        assert_eq!(local.queued(), 0, "buffered while paused");
+
+        // Resume: now it plays.
+        paused.store(false, Ordering::Relaxed);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(sp_rx.try_recv().is_ok(), "did not resume");
+
+        stop.store(true, Ordering::Relaxed);
+        let _ = player.join();
+        let _ = feeder.join();
+    }
+}

@@ -1421,3 +1421,70 @@ fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
     (p - (a + ab * t)).length()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ink_with_screen(id: u32) -> (Arc<Ink>, Page) {
+        let ink = Ink::new(egui::Context::default());
+        ink.set_me(1);
+        let surface = ink.open_mine(Kind::Screen, id);
+        (ink, Page { surface, n: 0 })
+    }
+
+    #[test]
+    fn text_tool_makes_a_visible_look() {
+        let (ink, page) = ink_with_screen(42);
+        ink.set_pen(Pen {
+            tool: Tool::Text,
+            color: 0,
+            size: 1,
+        });
+        assert!(ink.insert_text(page, pos2(0.3, 0.4), "Olá, mundo"));
+        let (looks, _) = ink.looks(page, Instant::now());
+        let t = looks
+            .iter()
+            .find(|l| l.tool == Tool::Text)
+            .expect("a text look");
+        assert_eq!(t.text.as_deref(), Some("Olá, mundo"));
+        assert!(t.color[3] > 0, "text would be invisible");
+        assert_eq!(t.points.len(), 1, "text has one anchor point");
+    }
+
+    #[test]
+    fn insert_text_refuses_when_the_pen_is_not_text() {
+        let (ink, page) = ink_with_screen(7);
+        ink.set_pen(Pen {
+            tool: Tool::Pen,
+            color: 0,
+            size: 1,
+        });
+        assert!(!ink.insert_text(page, pos2(0.1, 0.1), "x"));
+    }
+
+    #[test]
+    fn insert_text_refuses_blank_text() {
+        let (ink, page) = ink_with_screen(7);
+        ink.set_pen(Pen {
+            tool: Tool::Text,
+            color: 0,
+            size: 1,
+        });
+        assert!(!ink.insert_text(page, pos2(0.1, 0.1), "   "));
+    }
+
+    #[test]
+    fn a_text_stroke_can_be_undone() {
+        let (ink, page) = ink_with_screen(7);
+        ink.set_pen(Pen {
+            tool: Tool::Text,
+            color: 0,
+            size: 1,
+        });
+        ink.insert_text(page, pos2(0.1, 0.1), "hello");
+        assert_eq!(ink.looks(page, Instant::now()).0.len(), 1);
+        ink.undo();
+        assert_eq!(ink.looks(page, Instant::now()).0.len(), 0);
+    }
+}

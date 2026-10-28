@@ -186,6 +186,17 @@ impl PeerAudio {
         self.channels.load(Ordering::Relaxed).max(1)
     }
 
+    /// How many samples are queued and not yet played (interleaved, so
+    /// twice the frame count for a stereo buffer). For the music tests,
+    /// which assert the DJ's own buffer actually fills.
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        self.buf
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
     /// A packet stamped `timestamp` (RTP, 48 kHz) with `samples` of sound
     /// (per channel) arrived at `now`: the jitter, and so the target,
     /// follow.

@@ -483,6 +483,143 @@ mod tests {
         m
     }
 
+    /// A valid 48 kHz 16-bit stereo PCM WAV of `secs` of a 440 Hz tone,
+    /// for decode tests without a network or yt-dlp.
+    fn sine_wav(secs: f32) -> Vec<u8> {
+        let rate = 48_000u32;
+        let ch = 2u16;
+        let bits = 16u16;
+        let frames = (rate as f32 * secs) as u32;
+        let data_len = frames * u32::from(ch) * u32::from(bits / 8);
+        let mut v = Vec::new();
+        v.extend_from_slice(b"RIFF");
+        v.extend_from_slice(&(36 + data_len).to_le_bytes());
+        v.extend_from_slice(b"WAVE");
+        v.extend_from_slice(b"fmt ");
+        v.extend_from_slice(&16u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&ch.to_le_bytes());
+        v.extend_from_slice(&rate.to_le_bytes());
+        v.extend_from_slice(&(rate * u32::from(ch) * u32::from(bits / 8)).to_le_bytes());
+        v.extend_from_slice(&(ch * (bits / 8)).to_le_bytes());
+        v.extend_from_slice(&bits.to_le_bytes());
+        v.extend_from_slice(b"data");
+        v.extend_from_slice(&data_len.to_le_bytes());
+        for i in 0..frames {
+            let t = i as f32 / rate as f32;
+            let q = ((t * 440.0 * std::f32::consts::TAU).sin() * 10_000.0) as i16;
+            v.extend_from_slice(&q.to_le_bytes());
+            v.extend_from_slice(&q.to_le_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn decode_wav_yields_real_time_10ms_stereo_chunks() {
+        // 0.3 s of 48 kHz stereo is 14 400 frames = 28 800 samples, which
+        // is exactly 30 chunks of CHUNK*2 (10 ms each). This is the core
+        // of playback: the decoder must hand out whole 10 ms stereo
+        // chunks so the mixer and the Opus encoder stay in step.
+        let wav = sine_wav(0.3);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Pcm>(10_000);
+        let stop = AtomicBool::new(false);
+        let worker = std::thread::spawn(move || {
+            let r = decode(wav, "wav", &tx, &stop);
+            drop(tx);
+            r
+        });
+        let mut chunks = 0usize;
+        let mut nonzero = false;
+        while let Some(p) = rx.blocking_recv() {
+            assert_eq!(p.samples.len(), CHUNK * 2, "chunk not 10 ms stereo");
+            nonzero |= p.samples.iter().any(|s| s.abs() > 0.001);
+            chunks += 1;
+        }
+        worker.join().unwrap().expect("decode ok");
+        assert!((29..=31).contains(&chunks), "chunks={chunks}");
+        assert!(nonzero, "decoded silence");
+    }
+
+    /// Serves `body` over HTTP/1.1 on a throwaway port, honouring
+    /// `Range: bytes=N-` and handing out at most 8 KB per request (so the
+    /// `fetch_progressive` Range loop has to iterate), then 416 past the
+    /// end. `Connection: close` so each request is its own socket.
+    fn serve_with_range(body: Vec<u8>) -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let total = body.len();
+            for _ in 0..256 {
+                let Ok((mut sock, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 1024];
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match sock.read(&mut tmp) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                    }
+                }
+                let req = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+                let start = req
+                    .lines()
+                    .find_map(|l| l.strip_prefix("range: bytes="))
+                    .and_then(|r| r.split('-').next())
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if start >= total {
+                    let _ = sock.write_all(
+                        b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    continue;
+                }
+                let end = (start + 8192).min(total);
+                let header = format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    start,
+                    end - 1,
+                    total,
+                    end - start,
+                );
+                let _ = sock.write_all(header.as_bytes());
+                let _ = sock.write_all(&body[start..end]);
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn plays_a_whole_file_over_http_in_range_chunks() {
+        // reqwest here is built with rustls-no-provider; the app installs
+        // ring at startup, a test must do it itself (idempotent).
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        // 0.5 s of stereo = 24 000 frames = 50 chunks of 10 ms.
+        let wav = sine_wav(0.5);
+        let port = serve_with_range(wav);
+        let track = Extracted {
+            service: super::super::extractor::Service::YouTube,
+            title: "t".into(),
+            uploader: None,
+            duration: None,
+            stream_url: format!("http://127.0.0.1:{port}/song.wav"),
+            ext: "wav".into(),
+            hls: false,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Pcm>(100_000);
+        let stop = Arc::new(AtomicBool::new(false));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(play(track, tx, stop)).expect("play ok");
+        let mut chunks = 0usize;
+        while rx.blocking_recv().is_some() {
+            chunks += 1;
+        }
+        // The whole file came through the Range loop, not cut at one
+        // response (the "stopped at ~40 s" bug).
+        assert!(chunks >= 49, "cut short at {chunks} chunks");
+    }
+
     #[test]
     fn content_range_reads_the_total() {
         let h = headers(&[("Content-Range", "bytes 0-499/5000000")]);

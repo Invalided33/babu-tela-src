@@ -194,22 +194,28 @@ fn text_input(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
         .on_hover_cursor(CursorIcon::Text);
     crate::smoke::target(|| "anotacao".into(), area);
     let mut draft: TextDraft = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-    let had_draft = !draft.text.is_empty() || draft.at != Pos2::ZERO;
+    let open = ui.data(|d| d.get_temp::<bool>(id.with("open")).unwrap_or(false));
     let clicked = resp.clicked_by(PointerButton::Primary);
     let pointer = ui.input(|i| i.pointer.interact_pos());
     if clicked && let Some(at) = pointer {
-        // Clicking somewhere new while a draft is open commits the
-        // previous one (Enter is not the only way to confirm).
-        if !draft.text.is_empty() {
-            ink.insert_text(page, draft.at, &draft.text);
+        // Clicking somewhere new while a box is open commits the previous
+        // text first (Enter is not the only way to confirm).
+        if open && !draft.text.trim().is_empty() {
+            ink.insert_text(page, draft.at, draft.text.trim());
         }
         draft = TextDraft {
             at: to_page(picture, at),
             text: String::new(),
         };
-        ui.data_mut(|d| d.insert_temp(id, draft.clone()));
+        ui.data_mut(|d| {
+            d.insert_temp(id, draft.clone());
+            d.insert_temp(id.with("open"), true);
+            // Force the new box to grab focus on its first frame.
+            d.remove::<bool>(id.with("edit"));
+        });
     }
-    if !had_draft && draft.text.is_empty() && !clicked {
+    // Nothing to show until a click has placed a box.
+    if !open && !clicked {
         return;
     }
     // The input, laid at the anchor over the picture.
@@ -220,10 +226,13 @@ fn text_input(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
     );
     let font_px = (crate::ink::TEXT_SIZES[pen.size] * picture.height()).max(14.0);
     let width = (picture.width() * 0.5).clamp(140.0, 480.0);
-    let input_rect = Rect::from_min_size(anchor, vec2(width, font_px * 1.6 + 10.0));
+    let input_rect = Rect::from_min_size(anchor, vec2(width, font_px * 1.4 + 10.0));
     let edit_id = id.with("edit");
-    let text_was_empty_before = draft.text.is_empty();
-    let (commit, cancel) = ui
+    let first_frame = ui.data(|d| !d.get_temp::<bool>(edit_id).unwrap_or(false));
+    // Escape before anything is typed: the big-area click handler above
+    // would re-open an empty box, so read it here and bail.
+    let escape = ui.input(|i| i.key_pressed(Key::Escape));
+    let resp = ui
         .scope_builder(UiBuilder::new().max_rect(input_rect), |ui| {
             ui.painter().rect(
                 input_rect,
@@ -233,44 +242,54 @@ fn text_input(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
                 egui::StrokeKind::Inside,
             );
             let inner = input_rect.shrink(5.0);
-            let text_edit = egui::TextEdit::multiline(&mut draft.text)
+            // Single line, not multiline: a multiline edit swallows the
+            // Enter key (it inserts a newline), so the commit-on-Enter
+            // below would never see it. Single line reports `lost_focus`
+            // when Enter is pressed and leaves the text as typed.
+            let text_edit = egui::TextEdit::singleline(&mut draft.text)
                 .id(edit_id)
-                .margin(egui::Margin::ZERO)
+                .margin(egui::Margin::symmetric(4, 3))
                 .font(egui::FontId::proportional(font_px))
                 .text_color(color_from_slot(pen.color))
+                .background_color(Color32::TRANSPARENT)
                 .char_limit(crate::ink::MAX_TEXT_BYTES)
                 .desired_width(inner.width())
-                .hint_text(egui::RichText::new("Digite e Enter para colocar").color(MUTED));
-            let resp = ui
-                .scope_builder(UiBuilder::new().max_rect(inner), |ui| ui.add(text_edit))
-                .inner;
-            if resp.gained_focus() || text_was_empty_before {
-                resp.request_focus();
-            }
-            let keys = ui.input(|i| {
-                let enter = i.key_pressed(Key::Enter) && !i.modifiers.shift;
-                let esc = i.key_pressed(Key::Escape);
-                let clicked_out = i.pointer.primary_pressed()
-                    && i.pointer
-                        .press_origin()
-                        .is_some_and(|p| !input_rect.contains(p));
-                (enter, esc, clicked_out)
-            });
-            (keys.0, keys.1 || keys.2)
+                .hint_text(egui::RichText::new("Digite, Enter escreve").color(MUTED));
+            ui.put(inner, text_edit)
         })
         .inner;
-    if cancel {
-        ui.data_mut(|d| d.remove::<TextDraft>(id));
+    // Keep the box focused from the frame it opens; `ui.put` returns the
+    // response, and the edit keeps focus across frames once it has it.
+    if first_frame {
+        resp.request_focus();
+        ui.data_mut(|d| d.insert_temp(edit_id, true));
+    }
+    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+    // Clicking somewhere outside the box also ends the edit: commit what
+    // is there (unless it was an Escape).
+    let clicked_away = resp.lost_focus() && !enter && !escape;
+    if escape {
+        end_text_draft(ui, id, edit_id);
         return;
     }
-    if commit {
+    if enter || clicked_away {
         if !draft.text.trim().is_empty() {
-            ink.insert_text(page, draft.at, &draft.text);
+            ink.insert_text(page, draft.at, draft.text.trim());
         }
-        ui.data_mut(|d| d.remove::<TextDraft>(id));
+        end_text_draft(ui, id, edit_id);
         return;
     }
     ui.data_mut(|d| d.insert_temp(id, draft));
+}
+
+/// Clears the open text draft, the "box is open" flag and the "has focus"
+/// marker, so the next click starts a fresh box.
+fn end_text_draft(ui: &Ui, id: Id, edit_id: Id) {
+    ui.data_mut(|d| {
+        d.remove::<TextDraft>(id);
+        d.remove::<bool>(id.with("open"));
+        d.remove::<bool>(edit_id);
+    });
 }
 
 /// The RGBA colour of slot `i` in [`crate::ink::COLORS`], as a Color32.
