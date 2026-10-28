@@ -76,12 +76,13 @@ impl Status {
         [Status::Online, Status::Idle, Status::Dnd, Status::Invisible];
 
     pub fn label(self) -> &'static str {
+        use crate::t;
         match self {
-            Status::Online => "Disponível",
-            Status::Idle => "Ausente",
-            Status::Dnd => "Não perturbe",
-            Status::Invisible => "Invisível",
-            Status::Offline => "Offline",
+            Status::Online => t!("status.online"),
+            Status::Idle => t!("status.idle"),
+            Status::Dnd => t!("status.dnd"),
+            Status::Invisible => t!("status.invisible"),
+            Status::Offline => t!("status.offline"),
         }
     }
 

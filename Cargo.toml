@@ -14,7 +14,7 @@ exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-
 
 # The version lives only here: the app, the server and the installer read it.
 [workspace.package]
-version = "0.13.9"
+version = "0.14.0"
 edition = "2024"
 authors = ["Babu Tela"]
 publish = false
@@ -179,6 +179,7 @@ windows-core = "0.62.2"
 windows-registry = "0.100.0"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",

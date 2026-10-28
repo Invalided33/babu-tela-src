@@ -774,6 +774,16 @@ impl Smoke {
                         .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
                 }
             }
+            // idioma:pt|en: switches the language, as the Settings picker
+            // does; the whole interface redraws in it on the next frame.
+            ("idioma", code) => {
+                let lang = if code == "en" {
+                    crate::lang::Lang::En
+                } else {
+                    crate::lang::Lang::Pt
+                };
+                core.set_language(lang);
+            }
             // maximizar: the window maximized, as it opens outside the
             // tests; maximizar:off, back to its size.
             ("maximizar", off) => {

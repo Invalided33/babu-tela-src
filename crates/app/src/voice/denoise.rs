@@ -38,10 +38,11 @@ impl Noise {
     pub const ALL: [Noise; 3] = [Noise::Ia, Noise::Padrao, Noise::Desligada];
 
     pub fn label(self) -> &'static str {
+        use crate::t;
         match self {
-            Noise::Ia => "IA",
-            Noise::Padrao => "Padrão",
-            Noise::Desligada => "Desligada",
+            Noise::Ia => t!("noise.ia"),
+            Noise::Padrao => t!("noise.padrao"),
+            Noise::Desligada => t!("noise.desligada"),
         }
     }
 

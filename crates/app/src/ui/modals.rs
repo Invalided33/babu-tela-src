@@ -22,6 +22,7 @@ use crate::net::{self, Req};
 use crate::sounds::Cue;
 use crate::theme::{self, *};
 use crate::voice::{Noise, QUALITIES};
+use crate::{t, tf};
 
 const WIDTH: f32 = 460.0 - 44.0;
 const WIDE: f32 = 720.0 - 44.0;
@@ -300,9 +301,8 @@ fn device_select(
     saved: Option<&crate::devices::Device>,
     list: Option<&[crate::devices::Device]>,
 ) -> Option<Option<crate::devices::Device>> {
-    const DEFAULT: &str = "Padrão do Windows";
     let list = list.unwrap_or_default();
-    let mut names: Vec<String> = std::iter::once(DEFAULT.to_owned())
+    let mut names: Vec<String> = std::iter::once(t!("device.windows_default").to_owned())
         .chain(list.iter().map(|d| d.name.clone()))
         .collect();
     let mut value = match saved {
@@ -311,7 +311,7 @@ fn device_select(
             Some(i) => i + 1,
             // Not there (unplugged), or not listed yet.
             None => {
-                names.push(format!("{} (desconectado)", s.name));
+                names.push(tf!("device.disconnected", name = s.name));
                 names.len() - 1
             }
         },
@@ -757,9 +757,9 @@ fn invite(ui: &mut Ui, core: &Core, code: &str, acts: &mut Acts) {
 pub fn tor_text(status: &crate::tor::Status) -> String {
     use crate::tor::Status;
     match status {
-        Status::Ready => "Pelo Tor: conectado.".into(),
-        Status::Joining(f) => format!("Pelo Tor: entrando na rede ({:.0}%).", f * 100.0),
-        Status::Blocked(why) => format!("Pelo Tor: a rede não responde ({why})."),
+        Status::Ready => t!("tor.ready").to_owned(),
+        Status::Joining(f) => tf!("tor.joining", pct = format!("{:.0}", f * 100.0)),
+        Status::Blocked(why) => tf!("tor.blocked", why = why),
     }
 }
 
@@ -1263,7 +1263,7 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
 
 fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts) {
     let Some(me) = core.me.clone() else { return };
-    widgets::h3(ui, "Configurações");
+    widgets::h3(ui, t!("settings.title"));
     widgets::sub(ui, &widgets::handle(&me));
     ui.add_space(12.0);
     ui.horizontal(|ui| {
@@ -1271,10 +1271,19 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
         widgets::avatar(ui, core, &me, 64.0, false, BG2);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            if Button::ghost("Trocar foto").small().show(ui).clicked() {
+            if Button::ghost(t!("settings.change_photo"))
+                .small()
+                .show(ui)
+                .clicked()
+            {
                 acts.later(|c| c.pick_files(Pick::Avatar));
             }
-            if me.avatar.is_some() && Button::ghost("Remover").small().show(ui).clicked() {
+            if me.avatar.is_some()
+                && Button::ghost(t!("settings.remove"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+            {
                 acts.later(|c| {
                     c.call(
                         Req::patch("/me").with(json!({ "avatar": null })),
@@ -1286,10 +1295,10 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
         });
     });
     ui.add_space(14.0);
-    let r = widgets::field(ui, "Nome de exibição", display_name, 64, false);
+    let r = widgets::field(ui, t!("settings.display_name"), display_name, 64, false);
     widgets::error_line(ui, core.errors.get(&FormId::Profile));
     let busy = core.busy.contains(&FormId::Profile);
-    if (Button::primary("Salvar nome")
+    if (Button::primary(t!("settings.save_name"))
         .small()
         .enabled(!busy)
         .show(ui)
@@ -1301,7 +1310,7 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
         acts.later(move |c| {
             c.call(
                 Req::patch("/me").with(json!({ "displayName": n })),
-                Then::Toast("Nome salvo.".into()),
+                Then::Toast(t!("settings.name_saved").into()),
                 ErrTo::Form(FormId::Profile),
             )
         });
@@ -1312,19 +1321,29 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
         .position(|s| *s == me.status)
         .unwrap_or(0);
     let labels: Vec<&str> = Status::PICKABLE.iter().map(|s| s.label()).collect();
-    if select(ui, "status", "Status", &mut status, &labels) {
+    if select(ui, "status", t!("settings.status"), &mut status, &labels) {
         let picked = Status::PICKABLE[status];
         acts.later(move |c| c.set_status(picked));
     }
+    ui.add_space(14.0);
+    let mut lang = crate::lang::Lang::ALL
+        .iter()
+        .position(|l| *l == crate::lang::current())
+        .unwrap_or(0);
+    let langs: Vec<&str> = crate::lang::Lang::ALL.iter().map(|l| l.label()).collect();
+    if select(ui, "language", t!("settings.language"), &mut lang, &langs) {
+        let picked = crate::lang::Lang::ALL[lang];
+        acts.later(move |c| c.set_language(picked));
+    }
 
     widgets::divider(ui);
-    widgets::h3(ui, "Voz e vídeo");
+    widgets::h3(ui, t!("settings.voice_video"));
     ui.add_space(6.0);
     let devices = core.audio_devices.as_ref();
     if let Some(choice) = device_select(
         ui,
         "input-device",
-        "Microfone",
+        t!("settings.microphone"),
         core.input_device(),
         devices.map(|d| d.inputs.as_slice()),
     ) {
@@ -1333,49 +1352,46 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     if let Some(choice) = device_select(
         ui,
         "output-device",
-        "Saída de áudio",
+        t!("settings.audio_output"),
         core.output_device(),
         devices.map(|d| d.outputs.as_slice()),
     ) {
         acts.later(move |c| c.set_output_device(choice));
     }
-    widgets::sub(
-        ui,
-        "A saída vale para as chamadas, os sons do app e os anexos. Se o escolhido for desconectado, o app usa o padrão do Windows até ele voltar.",
-    );
+    widgets::sub(ui, t!("settings.output_hint"));
     ui.add_space(10.0);
     let mut noise = Noise::ALL
         .iter()
         .position(|n| *n == core.noise())
         .unwrap_or(0);
     let labels: Vec<&str> = Noise::ALL.iter().map(|n| n.label()).collect();
-    if select(ui, "noise", "Supressão de ruído", &mut noise, &labels) {
+    if select(ui, "noise", t!("settings.noise"), &mut noise, &labels) {
         let picked = Noise::ALL[noise];
         acts.later(move |c| c.set_noise(picked));
     }
     widgets::sub(
         ui,
         match Noise::ALL[noise] {
-            Noise::Ia => {
-                "Uma rede neural (DPDFNet) deixa só a sua voz: some com teclado, ventilador, trânsito e conversa ao fundo. Atrasa a voz em 50 ms e usa mais o processador."
-            }
-            Noise::Padrao => {
-                "A do WebRTC, a dos navegadores: tira o chiado constante, sem atraso, mas deixa passar os barulhos que vêm e vão."
-            }
-            Noise::Desligada => "Sua voz vai com o som do ambiente, como o microfone o pega.",
+            Noise::Ia => t!("settings.noise_ia"),
+            Noise::Padrao => t!("settings.noise_padrao"),
+            Noise::Desligada => t!("settings.noise_desligada"),
         },
     );
     ui.add_space(10.0);
     let on = core.sounds.enabled_count();
     egui::CollapsingHeader::new(
-        egui::RichText::new(format!("Sons  ·  {on} de {} ligados", Cue::ALL.len()))
-            .font(theme::bold(14.0)),
+        egui::RichText::new(tf!(
+            "settings.sounds_header",
+            on = on,
+            total = Cue::ALL.len()
+        ))
+        .font(theme::bold(14.0)),
     )
     .id_salt("sounds")
     .show(ui, |ui| {
         for cue in Cue::ALL {
             ui.horizontal(|ui| {
-                let label = format!("Ouvir: {}", cue.label());
+                let label = tf!("settings.hear", name = cue.label());
                 if widgets::icon_button_sized(
                     ui,
                     crate::icons::Icon::Play,
@@ -1404,15 +1420,13 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     });
 
     widgets::divider(ui);
-    widgets::h3(ui, "Privacidade");
+    widgets::h3(ui, t!("settings.privacy"));
     ui.add_space(6.0);
     let mut hide_ip = core.prefs.hide_ip;
     if widgets::check_row(
         ui,
-        "Esconder meu IP",
-        "Chamadas e arquivos diretos passam só pelo relay: quem está do outro lado vê o \
-         endereço dele, não o seu. Pode pesar um pouco na qualidade, e vale para as próximas \
-         conexões.",
+        t!("settings.hide_ip"),
+        t!("settings.hide_ip_hint"),
         &mut hide_ip,
         true,
     ) {
@@ -1421,8 +1435,8 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     let mut typing = !core.prefs.no_typing;
     if widgets::check_row(
         ui,
-        "Mostrar quando estou digitando",
-        "Desligado, o servidor e os outros não ficam sabendo quando você escreve.",
+        t!("settings.show_typing"),
+        t!("settings.show_typing_hint"),
         &mut typing,
         true,
     ) {
@@ -1431,10 +1445,8 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     let mut tor = core.prefs.tor;
     if widgets::check_row(
         ui,
-        "Conectar pelo Tor",
-        "Tudo o que o app manda passa pela rede Tor, que vem dentro dele: o servidor e a \
-         Cloudflare veem um endereço do Tor, não o seu. Fica mais lento, as chamadas e os \
-         arquivos diretos vão só pelo relay, e o login do Google continua no navegador.",
+        t!("settings.tor"),
+        t!("settings.tor_hint"),
         &mut tor,
         true,
     ) {
@@ -1445,32 +1457,32 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     }
 
     widgets::divider(ui);
-    widgets::h3(ui, "Aplicativo");
+    widgets::h3(ui, t!("settings.app"));
     ui.add_space(6.0);
     let s = core.shell.settings();
     let toggles = [
         (
             "notifications",
-            "Notificações",
-            "Avisar sobre mensagens diretas e menções",
+            t!("settings.notifications"),
+            t!("settings.notifications_hint"),
             s.notifications,
         ),
         (
             "minimizeToTray",
-            "Minimizar para a bandeja",
-            "Fechar a janela mantém o app rodando",
+            t!("settings.minimize_tray"),
+            t!("settings.minimize_tray_hint"),
             s.minimize_to_tray,
         ),
         (
             "openOnStartup",
-            "Iniciar com o Windows",
-            "Abrir o Babu Tela quando você entrar no computador",
+            t!("settings.startup"),
+            t!("settings.startup_hint"),
             s.open_on_startup,
         ),
         (
             "startMinimized",
-            "Iniciar minimizado",
-            "Abrir direto na bandeja",
+            t!("settings.start_min"),
+            t!("settings.start_min_hint"),
             s.start_minimized,
         ),
     ];
@@ -1483,50 +1495,52 @@ fn settings(ui: &mut Ui, core: &Core, display_name: &mut String, acts: &mut Acts
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!("Versão {} ·", babutela_buildinfo::VERSION)).color(MUTED),
+            egui::RichText::new(tf!(
+                "settings.version",
+                version = babutela_buildinfo::VERSION
+            ))
+            .color(MUTED),
         );
-        if widgets::link(ui, "Procurar atualizações").clicked() {
+        if widgets::link(ui, t!("settings.check_updates")).clicked() {
             acts.later(|c| c.check_update(crate::core::Check::Button));
         }
         ui.label(egui::RichText::new("·").color(MUTED));
-        if widgets::link(ui, "Licenças").clicked() {
+        if widgets::link(ui, t!("settings.licenses")).clicked() {
             acts.later(|c| c.open_modal(Modal::Licenses));
         }
     });
 
     widgets::divider(ui);
-    widgets::h3(ui, "Conta");
+    widgets::h3(ui, t!("settings.account"));
     ui.add_space(6.0);
     let with = if core.account.email.is_empty() {
-        "Você entra com a sua conta do Google.".to_owned()
+        t!("settings.account_google").to_owned()
     } else {
-        format!("Você entra com a conta do Google {}.", core.account.email)
+        tf!("settings.account_google_with", email = core.account.email)
     };
     widgets::sub(ui, &with);
     ui.add_space(14.0);
-    if Button::danger("Excluir minha conta")
+    if Button::danger(t!("settings.delete_account"))
         .small()
         .show(ui)
         .clicked()
     {
         acts.later(|c| {
             c.confirm(
-                "Excluir minha conta",
-                "Isso não pode ser desfeito. Sua conta e seu perfil, todas as suas mensagens e \
-                 arquivos, suas conversas diretas e os servidores que você criou, com tudo o \
-                 que há neles, serão apagados para sempre.",
-                "Excluir para sempre",
+                t!("settings.delete_account"),
+                t!("settings.delete_account_confirm"),
+                t!("settings.delete_forever"),
                 Action::DeleteAccount,
             )
         });
     }
     ui.add_space(18.0);
     ui.horizontal(|ui| {
-        if Button::danger("Sair da conta").show(ui).clicked() {
+        if Button::danger(t!("settings.signout")).show(ui).clicked() {
             acts.later(|c| c.logout(false));
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if Button::ghost("Fechar").show(ui).clicked() {
+            if Button::ghost(t!("common.close")).show(ui).clicked() {
                 acts.later(Core::close_modal);
             }
         });

@@ -30,6 +30,7 @@ mod google;
 mod icons;
 mod images;
 mod ink;
+mod lang;
 mod markdown;
 mod media;
 mod model;

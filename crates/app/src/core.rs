@@ -909,6 +909,9 @@ impl Core {
             });
         }
         let prefs = Prefs::load(&shell.path("prefs.json"));
+        // Before any text is drawn: the saved language, or the Windows
+        // account's the first time.
+        crate::lang::set(prefs.lang.unwrap_or_else(crate::lang::os_default));
         // Before any connection is made.
         crate::voice::rtc::set_hide_ip(prefs.hide_ip);
         // Before anything opens a device.
@@ -2923,6 +2926,16 @@ impl Core {
         self.save_prefs();
     }
 
+    /// The language chosen in Configurações. egui is immediate mode, so
+    /// the whole interface redraws in the new language on the next frame;
+    /// nothing has to restart.
+    pub fn set_language(&mut self, lang: crate::lang::Lang) {
+        crate::lang::set(lang);
+        self.prefs.lang = Some(lang);
+        self.save_prefs();
+        self.ctx.request_repaint();
+    }
+
     /// "Conectar pelo Tor" (tor.rs): chosen at the start, so the app opens
     /// again for it, once the person agrees.
     pub fn set_tor(&mut self, on: bool) {
@@ -2932,19 +2945,18 @@ impl Core {
             return;
         }
         let text = if on {
-            "O Babu Tela vai abrir de novo e passar pelo Tor. A primeira vez demora um pouco \
-             mais, enquanto ele entra na rede."
+            crate::t!("tor.restart_on")
         } else {
-            "O Babu Tela vai abrir de novo sem o Tor. O servidor vai ver o seu IP."
+            crate::t!("tor.restart_off")
         };
         self.confirm(
             if on {
-                "Conectar pelo Tor"
+                crate::t!("settings.tor")
             } else {
-                "Conectar sem o Tor"
+                crate::t!("auth.without_tor")
             },
             text,
-            "Abrir de novo agora",
+            crate::t!("common.reopen_now"),
             Action::Restart,
         );
     }

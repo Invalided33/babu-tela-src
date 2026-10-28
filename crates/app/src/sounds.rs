@@ -96,17 +96,18 @@ impl Cue {
     }
 
     pub fn label(self) -> &'static str {
+        use crate::t;
         match self {
-            Cue::Join => "Alguém entrou na chamada",
-            Cue::Leave => "Alguém saiu da chamada",
-            Cue::Disconnect => "Chamada desconectada",
-            Cue::Mute => "Microfone desligado",
-            Cue::Unmute => "Microfone ligado",
-            Cue::Deafen => "Áudio desligado",
-            Cue::Undeafen => "Áudio ligado",
-            Cue::StreamStart => "Alguém começou a transmitir a tela",
-            Cue::StreamStop => "Alguém parou de transmitir a tela",
-            Cue::Message => "Mensagem nova (direta ou menção)",
+            Cue::Join => t!("sound.join"),
+            Cue::Leave => t!("sound.leave"),
+            Cue::Disconnect => t!("sound.disconnect"),
+            Cue::Mute => t!("sound.mute"),
+            Cue::Unmute => t!("sound.unmute"),
+            Cue::Deafen => t!("sound.deafen"),
+            Cue::Undeafen => t!("sound.undeafen"),
+            Cue::StreamStart => t!("sound.stream_start"),
+            Cue::StreamStop => t!("sound.stream_stop"),
+            Cue::Message => t!("sound.message"),
             Cue::None => "",
         }
     }

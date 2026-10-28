@@ -47,6 +47,9 @@ pub struct Prefs {
     /// Everything goes through Tor, inside the app (tor.rs); read at the
     /// start.
     pub tor: bool,
+    /// The language chosen in Configurações (none: the Windows account's,
+    /// set the first time the app runs).
+    pub lang: Option<crate::lang::Lang>,
 }
 
 /// How loud one person plays on this PC: their voice and the sound of
@@ -145,6 +148,7 @@ mod tests {
             hide_ip: false,
             no_typing: false,
             tor: false,
+            lang: Some(crate::lang::Lang::En),
         };
         p.save(&path);
 
@@ -155,6 +159,7 @@ mod tests {
         assert_eq!(back.sounds_off, ["join"]);
         assert_eq!(back.people.get("7"), p.people.get("7"));
         assert_eq!(back.share_audio, Some(false));
+        assert_eq!(back.lang, Some(crate::lang::Lang::En));
         assert_eq!(back.input_device, p.input_device);
         assert_eq!(back.output_device, None);
         assert_eq!(back.noise, Some(Noise::Padrao));

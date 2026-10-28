@@ -13,6 +13,7 @@ use super::Acts;
 use super::widgets::{self, Button};
 use crate::core::{Core, FormId, Gate, Phase};
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 /// The indigo glow behind the card (`radial-gradient(circle at 25% 15%,
 /// #211f4d, var(--bg0) 60%)`), drawn as rings of fading colour.
@@ -86,25 +87,19 @@ pub fn sign_in(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     card(ui, "auth-card", |ui| {
         logo(ui, false);
         ui.label(
-            egui::RichText::new("Bem-vindo ao Babu Tela")
+            egui::RichText::new(t!("auth.welcome"))
                 .font(theme::h1())
                 .color(TEXT),
         );
         ui.add_space(4.0);
-        widgets::sub(
-            ui,
-            "Entre com sua conta do Google para continuar a conversa.",
-        );
+        widgets::sub(ui, t!("auth.subtitle"));
         ui.add_space(22.0);
         google_flow(ui, waiting, error.as_ref(), enter && !waiting, acts);
         ui.add_space(14.0);
         ui.label(
-            egui::RichText::new(
-                "Na primeira vez, sua conta do Babu Tela é criada com o nome da sua conta do \
-                 Google. Ninguém vê o seu e-mail.",
-            )
-            .color(FAINT)
-            .size(12.5),
+            egui::RichText::new(t!("auth.first_time"))
+                .color(FAINT)
+                .size(12.5),
         );
     });
 }
@@ -116,18 +111,15 @@ fn google_flow(ui: &mut Ui, waiting: bool, error: Option<&String>, enter: bool, 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.add(egui::Spinner::new().size(18.0).color(ACCENT));
-            ui.label(
-                egui::RichText::new("Continue no navegador: escolha sua conta do Google lá.")
-                    .color(MUTED),
-            );
+            ui.label(egui::RichText::new(t!("auth.in_browser")).color(MUTED));
         });
         ui.add_space(8.0);
-        if widgets::link(ui, "Cancelar").clicked() {
+        if widgets::link(ui, t!("common.cancel")).clicked() {
             acts.later(Core::cancel_google);
         }
         return;
     }
-    if widgets::google_button(ui, "Continuar com o Google", true).clicked() || enter {
+    if widgets::google_button(ui, t!("auth.google"), true).clicked() || enter {
         acts.later(Core::google_sign_in);
     }
     widgets::error_line(ui, error);
@@ -150,17 +142,12 @@ pub fn updating(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         ui.vertical_centered(|ui| {
             logo(ui, true);
             ui.label(
-                egui::RichText::new("Atualizando")
+                egui::RichText::new(t!("auth.updating"))
                     .font(theme::h1())
                     .color(TEXT),
             );
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(format!(
-                    "Baixando a versão {version}. O Babu Tela abre de novo sozinho quando terminar."
-                ))
-                .color(MUTED),
-            );
+            ui.label(egui::RichText::new(tf!("auth.downloading", version = version)).color(MUTED));
             ui.add_space(20.0);
         });
         let shown = if total > 0 { fraction } else { 0.0 };
@@ -172,10 +159,10 @@ pub fn updating(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         );
         ui.add_space(6.0);
         let amount = if total > 0 {
-            format!(
-                "{} de {}",
-                widgets::fmt_size(sent as i64),
-                widgets::fmt_size(total as i64)
+            tf!(
+                "common.x_of_y",
+                sent = widgets::fmt_size(sent as i64),
+                total = widgets::fmt_size(total as i64)
             )
         } else {
             widgets::fmt_size(sent as i64)
@@ -183,7 +170,7 @@ pub fn updating(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         ui.label(egui::RichText::new(amount).size(12.5).color(FAINT));
         ui.add_space(16.0);
         ui.vertical_centered(|ui| {
-            if widgets::link(ui, "Abrir agora e atualizar depois").clicked() {
+            if widgets::link(ui, t!("auth.open_now")).clicked() {
                 acts.later(Core::skip_update);
             }
         });
@@ -209,21 +196,17 @@ pub fn waiting(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             logo(ui, true);
             ui.label(
                 egui::RichText::new(if retry.is_some() {
-                    "Servidor fora do ar"
+                    t!("auth.server_down")
                 } else {
-                    "Conectando…"
+                    t!("auth.connecting")
                 })
                 .font(theme::h1())
                 .color(TEXT),
             );
             ui.add_space(6.0);
             let text = match left {
-                None => "Conectando ao servidor do Babu Tela…".to_owned(),
-                Some(s) => format!(
-                    "Não consegui falar com o servidor do Babu Tela. Confira sua internet; se ela \
-                     estiver funcionando, o servidor pode estar passando por manutenção. Tentando de \
-                     novo em {s} s."
-                ),
+                None => t!("auth.connecting_to").to_owned(),
+                Some(s) => tf!("auth.retry_in", s = s),
             };
             ui.label(egui::RichText::new(text).color(MUTED));
             // Through Tor (tor.rs): how far it is into the network (each
@@ -238,15 +221,20 @@ pub fn waiting(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             }
             ui.add_space(20.0);
         });
-        if retry.is_some() && Button::primary("Tentar agora").wide().show(ui).clicked() {
+        if retry.is_some()
+            && Button::primary(t!("auth.try_now"))
+                .wide()
+                .show(ui)
+                .clicked()
+        {
             acts.later(Core::retry_now);
         }
         ui.add_space(16.0);
         ui.vertical_centered(|ui| {
-            if crate::tor::active() && widgets::link(ui, "Conectar sem o Tor").clicked() {
+            if crate::tor::active() && widgets::link(ui, t!("auth.without_tor")).clicked() {
                 acts.later(|c| c.set_tor(false));
             }
-            if widgets::link(ui, "Sair da conta").clicked() {
+            if widgets::link(ui, t!("auth.logout")).clicked() {
                 acts.later(|c| c.logout(false));
             }
         });
