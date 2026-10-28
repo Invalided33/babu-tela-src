@@ -371,6 +371,8 @@ impl Music {
             // library is sync).
             let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::unbounded_channel::<Pcm>();
             let encoder_stop = stop_for_task.clone();
+            let this_for_encoder = this.clone();
+            let id_for_encoder = item.id.clone();
             let encoder_task = tokio::task::spawn_blocking(move || {
                 let mut encoder = match crate::voice::audio::ScreenEncoder::new(screen_packets) {
                     Ok(e) => e,
@@ -379,9 +381,17 @@ impl Music {
                         return;
                     }
                 };
+                let mut started = false;
                 while let Some(chunk) = pcm_rx.blocking_recv() {
                     if encoder_stop.load(Ordering::Relaxed) {
                         break;
+                    }
+                    // The first chunk out starts the elapsed clock for
+                    // everyone (`m-start`), so the seconds yt-dlp spent
+                    // fetching the song do not count.
+                    if !started {
+                        started = true;
+                        this_for_encoder.start_playing_locally(&id_for_encoder);
                     }
                     // Hear it on this PC through the same mixer screen
                     // share sound rides on. The screen audio buffer is
@@ -428,6 +438,15 @@ impl Music {
         if self.queue.finished(id) {
             self.sync_dj();
             self.broadcast(queue::skip_message(id));
+            self.ctx.request_repaint();
+        }
+    }
+
+    /// The DJ's player just sent its first PCM chunk out: the elapsed
+    /// clock starts now, locally and for everyone else.
+    fn start_playing_locally(self: &Arc<Music>, id: &str) {
+        if self.queue.start_playing(id) {
+            self.broadcast(queue::start_message(id));
             self.ctx.request_repaint();
         }
     }

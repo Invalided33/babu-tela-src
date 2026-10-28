@@ -171,7 +171,9 @@ impl Queue {
         g.items.retain(|it| members_now.contains(&it.by));
         let after = g.items.front().map(|it| it.id.clone());
         if before != after {
-            g.started_at = Some(Instant::now());
+            // The new head has not sent `m-start` yet: the elapsed clock
+            // stays at 0 until its DJ actually begins playing.
+            g.started_at = None;
             g.offset = Duration::ZERO;
             g.state = State::Playing;
         }
@@ -214,6 +216,12 @@ impl Queue {
             }
             Some("m-pause") => self.set_paused(true),
             Some("m-play") => self.set_paused(false),
+            Some("m-start") => {
+                let Some(id) = msg["id"].as_str() else {
+                    return false;
+                };
+                self.start_playing(id)
+            }
             Some("m-state") => {
                 let items = msg["queue"]
                     .as_array()
@@ -235,7 +243,11 @@ impl Queue {
                         g.items = items;
                         g.state = state;
                         g.offset = elapsed;
-                        g.started_at = if state == State::Playing {
+                        // Only roll the clock when the DJ had already
+                        // begun playing: a snapshot of a song still being
+                        // downloaded has `at == 0`, and the clock stays
+                        // off until the DJ's `m-start` comes.
+                        g.started_at = if state == State::Playing && elapsed > Duration::ZERO {
                             Some(Instant::now())
                         } else {
                             None
@@ -254,7 +266,9 @@ impl Queue {
         }
     }
 
-    /// Adds the item locally. Returns `true` if the queue changed.
+    /// Adds the item locally. Returns `true` if the queue changed. The
+    /// clock stays off until the DJ sends `m-start`: the elapsed timer
+    /// should not run while yt-dlp is still fetching.
     pub fn add(&self, item: Item) -> bool {
         let changed = {
             let mut g = self.lock();
@@ -264,7 +278,7 @@ impl Queue {
                 let was_empty = g.items.is_empty();
                 g.items.push_back(item);
                 if was_empty {
-                    g.started_at = Some(Instant::now());
+                    g.started_at = None;
                     g.offset = Duration::ZERO;
                     g.state = State::Playing;
                 }
@@ -278,6 +292,7 @@ impl Queue {
     }
 
     /// Removes the item whose id matches (any position; usually the head).
+    /// The next head gets a reset clock, off until its DJ sends `m-start`.
     pub fn skip(&self, id: &str) -> bool {
         let changed = {
             let mut g = self.lock();
@@ -287,7 +302,7 @@ impl Queue {
             }
             let after = g.items.front().map(|it| it.id.clone());
             if before != after {
-                g.started_at = Some(Instant::now());
+                g.started_at = None;
                 g.offset = Duration::ZERO;
                 g.state = State::Playing;
                 true
@@ -307,6 +322,28 @@ impl Queue {
         self.skip(id)
     }
 
+    /// The DJ started playing the song whose id matches the head. Starts
+    /// the elapsed clock from 0 for everyone, including the DJ (so the
+    /// seconds the yt-dlp download took do not count).
+    pub fn start_playing(&self, id: &str) -> bool {
+        let changed = {
+            let mut g = self.lock();
+            match g.items.front() {
+                Some(it) if it.id == id => {
+                    g.started_at = Some(Instant::now());
+                    g.offset = Duration::ZERO;
+                    g.state = State::Playing;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.bump();
+        }
+        changed
+    }
+
     pub fn set_paused(&self, paused: bool) -> bool {
         let changed = {
             let mut g = self.lock();
@@ -319,7 +356,13 @@ impl Queue {
                     true
                 }
                 (State::Paused, false) => {
-                    g.started_at = Some(Instant::now());
+                    // Only roll the clock back on if it was already
+                    // running when the pause came in (`offset > 0`).
+                    // Otherwise the song had not started yet, and the
+                    // DJ's `m-start` is what wakes the clock up.
+                    if !g.offset.is_zero() {
+                        g.started_at = Some(Instant::now());
+                    }
                     g.state = State::Playing;
                     true
                 }
@@ -402,9 +445,17 @@ pub fn play_message() -> Value {
     json!({ "t": "m-play" })
 }
 
+/// `m-start`: the DJ actually began playing `id`. The clock then starts.
+pub fn start_message(id: &str) -> Value {
+    json!({ "t": "m-start", "id": id })
+}
+
 /// Says `t` is one of this module's.
 pub fn handles(t: &str) -> bool {
-    matches!(t, "m-add" | "m-skip" | "m-pause" | "m-play" | "m-state")
+    matches!(
+        t,
+        "m-add" | "m-skip" | "m-pause" | "m-play" | "m-start" | "m-state"
+    )
 }
 
 #[cfg(test)]
@@ -482,6 +533,53 @@ mod tests {
         let msg = add_message(&item("x", 3));
         assert!(q.apply(&msg));
         assert_eq!(q.view().items.len(), 1);
+    }
+
+    #[test]
+    fn adding_a_song_does_not_start_the_clock() {
+        let q = Queue::new();
+        q.add(item("a", 1));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        // The clock is still at 0 because the DJ has not sent `m-start`.
+        assert!(q.view().elapsed < 0.01, "{}", q.view().elapsed);
+    }
+
+    #[test]
+    fn start_playing_turns_the_clock_on() {
+        let q = Queue::new();
+        q.add(item("a", 1));
+        assert!(q.start_playing("a"));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(q.view().elapsed > 0.01, "{}", q.view().elapsed);
+    }
+
+    #[test]
+    fn start_playing_ignores_a_mismatched_id() {
+        let q = Queue::new();
+        q.add(item("a", 1));
+        assert!(!q.start_playing("b"));
+        assert!(q.view().elapsed < 0.01);
+    }
+
+    #[test]
+    fn skipping_leaves_the_clock_off_for_the_next_song() {
+        let q = Queue::new();
+        q.add(item("a", 1));
+        q.add(item("b", 2));
+        q.start_playing("a");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        q.skip("a");
+        // `b` is at the head but its DJ has not sent `m-start` yet.
+        assert!(q.view().elapsed < 0.01, "{}", q.view().elapsed);
+    }
+
+    #[test]
+    fn apply_starts_the_clock_from_m_start() {
+        let q = Queue::new();
+        q.add(item("x", 3));
+        assert!(q.apply(&start_message("x")));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(q.view().elapsed > 0.01, "{}", q.view().elapsed);
     }
 
     #[test]
