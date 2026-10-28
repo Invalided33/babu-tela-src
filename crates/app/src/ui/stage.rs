@@ -15,6 +15,7 @@ use super::widgets::{self, Button, Ib};
 use crate::core::{Core, Pop, PopKind};
 use crate::icons::{self, Icon};
 use crate::model::*;
+use crate::t;
 use crate::theme::{self, *};
 use crate::voice::plan::{self, Candidate, Layer};
 
@@ -192,15 +193,18 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let style = if show_members { Ib::Normal } else { Ib::Bare };
-                if widgets::icon_button(ui, Icon::Users, 34.0, style, "Lista de membros").clicked()
+                if widgets::icon_button(ui, Icon::Users, 34.0, style, t!("chat.members_list"))
+                    .clicked()
                 {
                     acts.later(|c| c.show_members = !c.show_members);
                 }
-                if widgets::icon_button(ui, Icon::Expand, 34.0, Ib::Bare, "Tela cheia").clicked() {
+                if widgets::icon_button(ui, Icon::Expand, 34.0, Ib::Bare, t!("stage.fullscreen"))
+                    .clicked()
+                {
                     set_fullscreen(ui.ctx(), true);
                 }
                 if set_aside
-                    && Button::primary("Ver apresentação")
+                    && Button::primary(t!("stage.view_presentation"))
                         .small()
                         .show(ui)
                         .clicked()
@@ -225,14 +229,11 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                             |ui| super::sidebar::voice_buttons(ui, core, acts, 48.0, STAGE_BUTTONS),
                         );
                     } else if may_join {
-                        if Button::primary("Entrar na chamada").show(ui).clicked() {
+                        if Button::primary(t!("stage.join_call")).show(ui).clicked() {
                             acts.later(move |c| c.join_voice(cid));
                         }
                     } else {
-                        ui.label(
-                            egui::RichText::new("Você não tem permissão para entrar neste canal.")
-                                .color(MUTED),
-                        );
+                        ui.label(egui::RichText::new(t!("stage.no_join_perm")).color(MUTED));
                     }
                 });
             });
@@ -252,7 +253,7 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             // a banner with an "Assistir" button, then the normal tiles.
             super::slides::presenting_banner(ui, core, &users);
             if users.is_empty() {
-                super::empty(ui, "Ninguém na sala", "Entre para começar a conversa.");
+                super::empty(ui, t!("stage.empty_title"), t!("stage.empty_text"));
                 return HashMap::new();
             }
             tiles(ui, core, &users, joined, cid, acts)
@@ -342,13 +343,13 @@ fn fullscreen_bar(
                         if joined {
                             super::sidebar::voice_buttons(ui, core, acts, 48.0, ALL_BUTTONS);
                         } else if may_join
-                            && Button::primary("Entrar na chamada").show(ui).clicked()
+                            && Button::primary(t!("stage.join_call")).show(ui).clicked()
                         {
                             acts.later(move |c| c.join_voice(cid));
                         }
                         ui.add_space(6.0);
                         if let Some(uid) = screen
-                            && Button::danger("Parar de assistir").show(ui).clicked()
+                            && Button::danger(t!("stage.stop_watching")).show(ui).clicked()
                         {
                             set_zoom(ui.ctx(), cid, None);
                             set_fullscreen(ui.ctx(), false);
@@ -360,7 +361,7 @@ fn fullscreen_bar(
                             48.0,
                             icons::LARGE,
                             Ib::Normal,
-                            "Sair da tela cheia (Esc)",
+                            t!("stage.exit_fullscreen"),
                         );
                         crate::smoke::target(|| "sair-da-tela-cheia".into(), out.rect);
                         if out.clicked() {
@@ -617,7 +618,7 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
             if !edge_to_edge {
                 let resp = resp
                     .on_hover_cursor(CursorIcon::ZoomIn)
-                    .on_hover_text("Clique para ampliar");
+                    .on_hover_text(t!("stage.click_to_enlarge"));
                 click.zoom = resp.clicked();
             }
             // Over the picture while the pointer is on it, as Discord has
@@ -629,7 +630,7 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
                 let name = u.username.clone();
                 let mut right = rect.right_bottom() - vec2(10.0, 10.0);
                 let id = Id::unique(("tile-fullscreen", v.user_id));
-                let full = over_button(ui, id, right, Icon::Expand, None, "Tela cheia");
+                let full = over_button(ui, id, right, Icon::Expand, None, t!("stage.fullscreen"));
                 crate::smoke::target(|| format!("tela-cheia:{name}"), full.rect);
                 click.fullscreen = full.clicked();
                 if their_screen {
@@ -640,8 +641,8 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
                         id,
                         right,
                         Icon::X,
-                        Some("Parar de assistir"),
-                        "Parar de assistir a transmissão (a imagem e o som param de vir)",
+                        Some(t!("stage.stop_watching")),
+                        t!("stage.stop_watching_tip"),
                     );
                     crate::smoke::target(|| format!("parar-de-assistir:{name}"), stop.rect);
                     click.stop = stop.clicked();
@@ -671,7 +672,7 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
                         .max_rect(row)
                         .layout(Layout::top_down(Align::Center)),
                 );
-                click.watch = Button::primary("Assistir transmissão")
+                click.watch = Button::primary(t!("stage.watch_stream"))
                     .small()
                     .show(&mut child)
                     .clicked();
@@ -691,9 +692,9 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
     let mut label = u.name().to_owned();
     if v.video == Some(Video::Screen) {
         label.push_str(if gains.screen == 0.0 {
-            " · tela sem som"
+            t!("stage.tag_screen_muted")
         } else {
-            " · tela"
+            t!("stage.tag_screen")
         });
     }
     let presents = if v.user_id == core.me_id() {
@@ -702,7 +703,7 @@ pub(super) fn tile(ui: &mut Ui, core: &Core, v: &VoiceUser, rect: Rect, video: b
         core.voice.slides().presenting(v.user_id)
     };
     if presents {
-        label.push_str(" · apresentando");
+        label.push_str(t!("stage.tag_presenting"));
     }
     let galley = ui.painter().layout_no_wrap(label, theme::small(), TEXT);
     let mut off = Vec::new();

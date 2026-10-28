@@ -12,6 +12,7 @@ use crate::icons::Icon;
 use crate::model::*;
 use crate::net::Req;
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 fn tab(ui: &mut Ui, label: &str, on: bool, add: bool) -> bool {
     let galley = ui
@@ -48,29 +49,29 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     super::header(ui, "friends-head", |ui| {
         ui.add(Icon::Users.tinted(MUTED));
         ui.label(
-            egui::RichText::new("Amigos")
+            egui::RichText::new(t!("friends.title"))
                 .font(theme::bold(15.0))
                 .color(TEXT),
         );
         ui.add_space(4.0);
         ui.spacing_mut().item_spacing.x = 6.0;
         let pending_label = if pending > 0 {
-            format!("Pendentes ({pending})")
+            tf!("friends.tab_pending_n", n = pending)
         } else {
-            "Pendentes".to_owned()
+            t!("friends.tab_pending").to_owned()
         };
         let tabs = [
-            (FriendTab::Online, "Online".to_owned()),
-            (FriendTab::All, "Todos".to_owned()),
+            (FriendTab::Online, t!("friends.tab_online").to_owned()),
+            (FriendTab::All, t!("friends.tab_all").to_owned()),
             (FriendTab::Pending, pending_label),
-            (FriendTab::Blocked, "Bloqueados".to_owned()),
+            (FriendTab::Blocked, t!("friends.tab_blocked").to_owned()),
         ];
         for (t, label) in tabs {
             if tab(ui, &label, current == t, false) {
                 acts.later(move |c| c.friend_tab = t);
             }
         }
-        if tab(ui, "Adicionar amigo", current == FriendTab::Add, true) {
+        if tab(ui, t!("friends.tab_add"), current == FriendTab::Add, true) {
             acts.later(|c| c.friend_tab = FriendTab::Add);
         }
     });
@@ -136,21 +137,21 @@ fn list(ui: &mut Ui, core: &Core, tab: FriendTab, acts: &mut Acts) {
         })
         .collect();
     let label = match tab {
-        FriendTab::Online => "Online",
-        FriendTab::Pending => "Pedidos pendentes",
-        _ => "Todos os amigos",
+        FriendTab::Online => t!("friends.tab_online"),
+        FriendTab::Pending => t!("friends.list_pending"),
+        _ => t!("friends.list_all"),
     };
     widgets::caption(ui, &format!("{label} — {}", all.len()));
     ui.add_space(6.0);
     if all.is_empty() {
-        ui.label(egui::RichText::new("Ninguém por aqui ainda.").color(MUTED));
+        ui.label(egui::RichText::new(t!("friends.nobody_yet")).color(MUTED));
         return;
     }
     for f in all {
         let uid = f.user.id;
         let sub = match f.state {
-            FriendState::Incoming => "Quer ser seu amigo",
-            FriendState::Outgoing => "Pedido enviado",
+            FriendState::Incoming => t!("friends.wants_to_be"),
+            FriendState::Outgoing => t!("friends.request_sent"),
             FriendState::Accepted => f.user.status.public().label(),
         };
         frow(ui, |ui| {
@@ -173,18 +174,34 @@ fn list(ui: &mut Ui, core: &Core, tab: FriendTab, acts: &mut Acts) {
                 };
                 match f.state {
                     FriendState::Accepted => {
-                        if Button::ghost("Remover").small().show(ui).clicked() {
+                        if Button::ghost(t!("settings.remove"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             unfriend(acts);
                         }
-                        if Button::ghost("Mensagem").small().show(ui).clicked() {
+                        if Button::ghost(t!("friends.message"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             acts.later(move |c| c.open_dm(uid));
                         }
                     }
                     FriendState::Incoming => {
-                        if Button::ghost("Recusar").small().show(ui).clicked() {
+                        if Button::ghost(t!("friends.decline"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             unfriend(acts);
                         }
-                        if Button::primary("Aceitar").small().show(ui).clicked() {
+                        if Button::primary(t!("friends.accept"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             acts.later(move |c| {
                                 c.call(
                                     Req::put(format!("/friends/{uid}")),
@@ -195,7 +212,11 @@ fn list(ui: &mut Ui, core: &Core, tab: FriendTab, acts: &mut Acts) {
                         }
                     }
                     FriendState::Outgoing => {
-                        if Button::ghost("Cancelar").small().show(ui).clicked() {
+                        if Button::ghost(t!("common.cancel"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             unfriend(acts);
                         }
                     }
@@ -208,10 +229,13 @@ fn list(ui: &mut Ui, core: &Core, tab: FriendTab, acts: &mut Acts) {
 fn blocked(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     let mut ids: Vec<i64> = core.blocks.iter().copied().collect();
     ids.sort_unstable();
-    widgets::caption(ui, &format!("Bloqueados — {}", ids.len()));
+    widgets::caption(
+        ui,
+        &format!("{} — {}", t!("friends.tab_blocked"), ids.len()),
+    );
     ui.add_space(6.0);
     if ids.is_empty() {
-        ui.label(egui::RichText::new("Você não bloqueou ninguém.").color(MUTED));
+        ui.label(egui::RichText::new(t!("friends.no_blocks")).color(MUTED));
         return;
     }
     for id in ids {
@@ -220,7 +244,11 @@ fn blocked(ui: &mut Ui, core: &Core, acts: &mut Acts) {
             widgets::avatar(ui, core, &u, 36.0, false, BG2);
             who(ui, u.name(), &widgets::handle(&u));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if Button::ghost("Desbloquear").small().show(ui).clicked() {
+                if Button::ghost(t!("friends.unblock"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     acts.later(move |c| {
                         c.call(
                             Req::delete(format!("/blocks/{id}")),
@@ -235,9 +263,9 @@ fn blocked(ui: &mut Ui, core: &Core, acts: &mut Acts) {
 }
 
 fn add(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
-    widgets::caption(ui, "Adicionar amigo");
+    widgets::caption(ui, t!("friends.tab_add"));
     ui.add_space(4.0);
-    ui.label(egui::RichText::new("Digite o nome de usuário exato da pessoa.").color(MUTED));
+    ui.label(egui::RichText::new(t!("friends.add_hint")).color(MUTED));
     ui.add_space(8.0);
     let busy = core.busy.contains(&FormId::AddFriend);
     let error = core.errors.get(&FormId::AddFriend).cloned();
@@ -247,13 +275,19 @@ fn add(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         let width = (ui.available_width() - 140.0).max(120.0);
         let resp = ui
             .allocate_ui(vec2(width, 38.0), |ui| {
-                widgets::input(ui, &mut core.add_friend, 40, false, "nome.de.usuario")
+                widgets::input(
+                    ui,
+                    &mut core.add_friend,
+                    40,
+                    false,
+                    t!("friends.username_placeholder"),
+                )
             })
             .inner;
         if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             send = true;
         }
-        if Button::primary("Enviar pedido")
+        if Button::primary(t!("friends.send_request"))
             .enabled(!busy)
             .show(ui)
             .clicked()
