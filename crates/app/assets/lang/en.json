@@ -667,5 +667,23 @@
   "tray.open": "Open {name}",
   "tray.toggle_mic": "Toggle microphone",
   "tray.toggle_audio": "Toggle audio",
-  "tray.quit": "Quit"
+  "tray.quit": "Quit",
+
+  "core.e2e_unavailable": "Encryption unavailable right now: {e}",
+  "core.only_encrypted_edit": "Only encrypted messages can be edited.",
+  "core.react_failed": "Couldn't react: the message didn't open here.",
+  "core.file_gone": "The file isn't there anymore. You can download it again.",
+  "core.account_deleted": "Your account was deleted.",
+  "core.joined_elsewhere": "You joined the call from another device.",
+  "core.restart_failed": "Couldn't reopen the app: {e}",
+  "core.message_too_long": "Message too long (maximum 100 thousand characters)",
+
+  "net.cant_read": "Couldn't read {name}: {e}",
+
+  "slides.present_failed": "Couldn't open the presentation.",
+
+  "voice.no_screen": "No screen found to share.",
+  "voice.window_closed": "The window you were sharing was closed.",
+  "voice.share_gpu_failed": "Sharing stopped: the graphics card failed.",
+  "voice.no_pc_audio": "Couldn't share the PC's sound: the screen continues without it."
 }

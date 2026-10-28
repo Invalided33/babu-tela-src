@@ -52,7 +52,7 @@ impl Core {
             }
             State::Failed(e) => {
                 crate::logln!("e2e: {e}");
-                self.toast(format!("Criptografia indisponível agora: {e}"));
+                self.toast(crate::tf!("core.e2e_unavailable", e = e));
             }
             State::Off | State::Starting => {}
         }
@@ -466,7 +466,7 @@ impl Core {
             return;
         };
         let Some(body) = e2e::edit_body(&m, &content) else {
-            self.toast("Só mensagens cifradas podem ser editadas.");
+            self.toast(crate::t!("core.only_encrypted_edit"));
             return;
         };
         let e2e = self.e2e.clone();
@@ -492,7 +492,7 @@ impl Core {
     /// A reaction to `m`: its mark in the path, the sealed emoji in the body.
     pub(super) fn react_sealed(&mut self, m: &Message, emoji: &str, mine: bool) {
         let Some((token, data)) = self.e2e.reaction(m, emoji) else {
-            self.toast("Não deu para reagir: a mensagem não abriu aqui.");
+            self.toast(crate::t!("core.react_failed"));
             return;
         };
         let path = format!("/messages/{}/reactions/{token}", m.id);

@@ -507,7 +507,7 @@ impl Api {
             .unwrap_or_else(|| "arquivo".into());
         let size = tokio::fs::metadata(path)
             .await
-            .map_err(|e| ApiError::msg(format!("Não consegui ler {name}: {e}")))?
+            .map_err(|e| ApiError::msg(crate::tf!("net.cant_read", name = name, e = e)))?
             .len();
         let key = crate::e2e::FileKey::new(size);
         let mut a = self.upload_with(path, progress, Some(key.clone())).await?;
@@ -527,7 +527,8 @@ impl Api {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "arquivo".into());
-        let unreadable = |e: std::io::Error| ApiError::msg(format!("Não consegui ler {real}: {e}"));
+        let unreadable =
+            |e: std::io::Error| ApiError::msg(crate::tf!("net.cant_read", name = real, e = e));
         // Opened here only to say early when it cannot be read; each part
         // opens it again for itself.
         let file = tokio::fs::File::open(path).await.map_err(unreadable)?;

@@ -783,7 +783,7 @@ impl Voice {
             Some(Video::Screen) => match Source::main_screen() {
                 Some(s) => Some(s),
                 None => {
-                    (self.toast)("Não achei nenhuma tela para compartilhar.".into());
+                    (self.toast)(crate::t!("voice.no_screen").into());
                     return;
                 }
             },
@@ -1158,7 +1158,7 @@ impl Voice {
         if ended {
             crate::logln!("vídeo: a janela compartilhada foi fechada");
             self.share(None);
-            (self.toast)("A janela que você compartilhava foi fechada.".into());
+            (self.toast)(crate::t!("voice.window_closed").into());
         }
         // The graphics card stopped encoding in the middle of the share:
         // it carries on through the processor, with the same tracks.
@@ -1172,7 +1172,7 @@ impl Voice {
             Some(Err(e)) => {
                 crate::logln!("vídeo: nem pelo processador ({e})");
                 self.share(None);
-                (self.toast)("O compartilhamento parou: a placa de vídeo falhou.".into());
+                (self.toast)(crate::t!("voice.share_gpu_failed").into());
             }
             None => {}
         }
@@ -1186,7 +1186,7 @@ impl Voice {
         {
             call.loopback = None;
             let _ = call.cmds.send(rtc::Cmd::ScreenAudio(false));
-            (self.toast)("Não deu para compartilhar o som do PC: a tela continua sem ele.".into());
+            (self.toast)(crate::t!("voice.no_pc_audio").into());
         }
         if self.shared.noise_overloaded.swap(false, Ordering::Relaxed) {
             (self.toast)(

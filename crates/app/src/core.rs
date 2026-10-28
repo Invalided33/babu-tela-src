@@ -1391,7 +1391,7 @@ impl Core {
     pub fn open_direct(&mut self, id: &str, path: PathBuf, folder: bool) {
         if !path.exists() {
             self.direct.forget(id);
-            self.toast("O arquivo não está mais lá. Dá para baixar de novo.");
+            self.toast(crate::t!("core.file_gone"));
             return;
         }
         std::thread::spawn(move || {
@@ -1825,7 +1825,7 @@ impl Core {
             }
             Then::AccountDeleted => {
                 self.logout(true);
-                self.toast("Sua conta foi excluída.");
+                self.toast(crate::t!("core.account_deleted"));
             }
             Then::FriendRequested { close_modal } => {
                 if close_modal {
@@ -2273,7 +2273,7 @@ impl Core {
             }
             "VOICE_KICK" => {
                 self.voice.leave(true, Cue::Disconnect);
-                self.toast("Você entrou na chamada por outro dispositivo.");
+                self.toast(crate::t!("core.joined_elsewhere"));
             }
             _ => {}
         }
@@ -2975,7 +2975,7 @@ impl Core {
         });
         match started {
             Ok(_) => self.quit(),
-            Err(e) => self.toast(format!("Não deu para abrir o app de novo: {e}")),
+            Err(e) => self.toast(crate::tf!("core.restart_failed", e = e)),
         }
     }
 
@@ -3482,7 +3482,7 @@ impl Core {
             return;
         }
         if content.encode_utf16().count() > net::MAX_MESSAGE {
-            self.toast("Mensagem muito longa (máximo de 100 mil caracteres)");
+            self.toast(crate::t!("core.message_too_long"));
             return;
         }
         let mut files = std::mem::take(&mut self.files);

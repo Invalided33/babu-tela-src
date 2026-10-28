@@ -667,5 +667,23 @@
   "tray.open": "Abrir {name}",
   "tray.toggle_mic": "Ligar/desligar microfone",
   "tray.toggle_audio": "Ligar/desligar áudio",
-  "tray.quit": "Sair"
+  "tray.quit": "Sair",
+
+  "core.e2e_unavailable": "Criptografia indisponível agora: {e}",
+  "core.only_encrypted_edit": "Só mensagens cifradas podem ser editadas.",
+  "core.react_failed": "Não deu para reagir: a mensagem não abriu aqui.",
+  "core.file_gone": "O arquivo não está mais lá. Dá para baixar de novo.",
+  "core.account_deleted": "Sua conta foi excluída.",
+  "core.joined_elsewhere": "Você entrou na chamada por outro dispositivo.",
+  "core.restart_failed": "Não deu para abrir o app de novo: {e}",
+  "core.message_too_long": "Mensagem muito longa (máximo de 100 mil caracteres)",
+
+  "net.cant_read": "Não consegui ler {name}: {e}",
+
+  "slides.present_failed": "Não deu para abrir a apresentação.",
+
+  "voice.no_screen": "Não achei nenhuma tela para compartilhar.",
+  "voice.window_closed": "A janela que você compartilhava foi fechada.",
+  "voice.share_gpu_failed": "O compartilhamento parou: a placa de vídeo falhou.",
+  "voice.no_pc_audio": "Não deu para compartilhar o som do PC: a tela continua sem ele."
 }

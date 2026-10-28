@@ -100,7 +100,7 @@ pub fn start(
         });
     if spawned.is_err() {
         slides.stop_mine_if(id);
-        toast("Não deu para abrir a apresentação.".into());
+        toast(crate::t!("slides.present_failed").into());
     }
 }
 
