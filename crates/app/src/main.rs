@@ -355,6 +355,9 @@ fn main() {
             Some(_) => std::env::var_os("PROSA_SMOKE_HIDDEN").is_some(),
             None => shell.start_hidden(),
         };
+    // The language for any fatal-startup dialog below, before Core::new
+    // loads the saved choice: the Windows account's.
+    lang::set(lang::os_default());
     // An update downloaded before is installed before anything opens, the
     // way Discord's splash screen does it (update.rs): the installer waits
     // for this process to end, shows its progress (unless the app was
@@ -379,7 +382,7 @@ fn main() {
     {
         Ok(rt) => rt,
         Err(e) => {
-            winsys::alert(&format!("O Babu Tela não conseguiu iniciar.\n\n{e}"));
+            winsys::alert(&crate::tf!("main.start_failed", e = e));
             std::process::exit(1);
         }
     };
@@ -391,10 +394,7 @@ fn main() {
             logln!("tor: {e}");
             // Never without it unless the person says so: they turned it
             // on to keep their IP from the server.
-            let without = winsys::ask(&format!(
-                "O Babu Tela não conseguiu ligar o Tor.\n\n{e}\n\n\
-                 Abrir sem o Tor? O servidor vai ver o seu IP. (\"Não\" fecha o app.)"
-            ));
+            let without = winsys::ask(&crate::tf!("main.tor_failed", e = e));
             if !without {
                 std::process::exit(1);
             }
@@ -515,10 +515,7 @@ fn main() {
         // With windows_subsystem = "windows" there is no console, so
         // without this the app would just not open.
         logln!("{e}");
-        winsys::alert(&format!(
-            "O Babu Tela não conseguiu abrir a janela.\n\n{e}\n\n\
-             Se o problema continuar, atualize o driver de vídeo e tente de novo."
-        ));
+        winsys::alert(&crate::tf!("main.window_failed", e = e));
         std::process::exit(1);
     }
 }

@@ -113,14 +113,14 @@ impl Tool {
     /// What the toolbars call it.
     pub fn name(self) -> &'static str {
         match self {
-            Tool::Vanish => "Tinta que some",
-            Tool::Pen => "Caneta",
-            Tool::Highlighter => "Marca-texto",
-            Tool::Arrow => "Seta",
-            Tool::Rect => "Retângulo",
-            Tool::Ellipse => "Elipse",
-            Tool::Text => "Texto",
-            Tool::Eraser => "Borracha",
+            Tool::Vanish => crate::t!("tool.vanish"),
+            Tool::Pen => crate::t!("tool.pen"),
+            Tool::Highlighter => crate::t!("tool.highlighter"),
+            Tool::Arrow => crate::t!("tool.arrow"),
+            Tool::Rect => crate::t!("tool.rect"),
+            Tool::Ellipse => crate::t!("tool.ellipse"),
+            Tool::Text => crate::t!("tool.text"),
+            Tool::Eraser => crate::t!("tool.eraser"),
         }
     }
 }

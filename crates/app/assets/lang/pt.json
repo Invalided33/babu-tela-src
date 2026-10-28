@@ -621,5 +621,28 @@
   "ink.clear_mine": "Limpar as minhas",
   "ink.clear_all": "Limpar tudo",
   "ink.everyone": "Todos podem anotar",
-  "ink.only_me": "Só eu posso anotar"
+  "ink.only_me": "Só eu posso anotar",
+  "ink.overlay_open": "Desenhar sobre a tela que você compartilha",
+  "ink.overlay_pointer": "Voltar ao mouse (ou clique com o botão direito)",
+  "ink.overlay_who_everyone": "Todos podem anotar: clique para só você",
+  "ink.overlay_who_only_me": "Só você pode anotar: clique para todos",
+
+  "tool.vanish": "Tinta que some",
+  "tool.pen": "Caneta",
+  "tool.highlighter": "Marca-texto",
+  "tool.arrow": "Seta",
+  "tool.rect": "Retângulo",
+  "tool.ellipse": "Elipse",
+  "tool.text": "Texto",
+  "tool.eraser": "Borracha",
+
+  "core.download_done_title": "Download concluído",
+  "core.download_done": "Download concluído: {name}",
+
+  "voice.no_mic_listen": "Sem acesso ao microfone: você entrou só para ouvir.",
+  "voice.no_mic": "Nenhum microfone disponível.",
+
+  "main.start_failed": "O Babu Tela não conseguiu iniciar.\n\n{e}",
+  "main.tor_failed": "O Babu Tela não conseguiu ligar o Tor.\n\n{e}\n\nAbrir sem o Tor? O servidor vai ver o seu IP. (\"Não\" fecha o app.)",
+  "main.window_failed": "O Babu Tela não conseguiu abrir a janela.\n\n{e}\n\nSe o problema continuar, atualize o driver de vídeo e tente de novo."
 }

@@ -1335,9 +1335,13 @@ impl Core {
             News::Downloaded { name, cid } => {
                 if !self.focused {
                     let view = self.channel_view(cid);
-                    self.notify("Download concluído".into(), name.clone(), view);
+                    self.notify(
+                        crate::t!("core.download_done_title").into(),
+                        name.clone(),
+                        view,
+                    );
                 }
-                self.toast(format!("Download concluído: {name}"));
+                self.toast(crate::tf!("core.download_done", name = name));
             }
             News::Stopped { name, from, why } => {
                 let who = self.user(from).name().to_owned();

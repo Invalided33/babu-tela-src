@@ -207,7 +207,7 @@ impl Music {
     pub fn add_url(self: &Arc<Music>, url: String, by_name: String) {
         let me = self.me.load(Ordering::Relaxed);
         if me == 0 {
-            (self.toast)("Entre numa chamada para tocar música.".into());
+            (self.toast)(crate::t!("music.join_to_play").into());
             return;
         }
         if extractor::classify(&url).is_none() {

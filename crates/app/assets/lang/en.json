@@ -621,5 +621,28 @@
   "ink.clear_mine": "Clear mine",
   "ink.clear_all": "Clear all",
   "ink.everyone": "Everyone can annotate",
-  "ink.only_me": "Only I can annotate"
+  "ink.only_me": "Only I can annotate",
+  "ink.overlay_open": "Draw over the screen you share",
+  "ink.overlay_pointer": "Back to the mouse (or right-click)",
+  "ink.overlay_who_everyone": "Everyone can annotate: click for only you",
+  "ink.overlay_who_only_me": "Only you can annotate: click for everyone",
+
+  "tool.vanish": "Disappearing ink",
+  "tool.pen": "Pen",
+  "tool.highlighter": "Highlighter",
+  "tool.arrow": "Arrow",
+  "tool.rect": "Rectangle",
+  "tool.ellipse": "Ellipse",
+  "tool.text": "Text",
+  "tool.eraser": "Eraser",
+
+  "core.download_done_title": "Download complete",
+  "core.download_done": "Download complete: {name}",
+
+  "voice.no_mic_listen": "No microphone access: you joined to listen only.",
+  "voice.no_mic": "No microphone available.",
+
+  "main.start_failed": "Babu Tela couldn't start.\n\n{e}",
+  "main.tor_failed": "Babu Tela couldn't start Tor.\n\n{e}\n\nOpen without Tor? The server will see your IP. (\"No\" closes the app.)",
+  "main.window_failed": "Babu Tela couldn't open the window.\n\n{e}\n\nIf the problem continues, update your video driver and try again."
 }

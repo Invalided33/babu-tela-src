@@ -1185,20 +1185,20 @@ impl Item {
     /// What the bar says of it while the mouse is over it.
     fn tip(self, s: &BarState) -> &'static str {
         match self {
-            Item::Open => "Desenhar sobre a tela que você compartilha",
-            Item::Pointer => "Voltar ao mouse (ou clique com o botão direito)",
+            Item::Open => crate::t!("ink.overlay_open"),
+            Item::Pointer => crate::t!("ink.overlay_pointer"),
             Item::Tool(t) => t.name(),
-            Item::Color => "Cor e espessura",
-            Item::Swatch(_) => "Cor",
-            Item::Size(0) => "Fina",
-            Item::Size(1) => "Média",
-            Item::Size(_) => "Grossa",
-            Item::Undo => "Desfazer",
-            Item::Redo => "Refazer",
-            Item::Clear => "Limpar tudo",
-            Item::Who if s.everyone => "Todos podem anotar: clique para só você",
-            Item::Who => "Só você pode anotar: clique para todos",
-            Item::Close => "Parar de anotar",
+            Item::Color => crate::t!("ink.color_width"),
+            Item::Swatch(_) => crate::t!("ink.color"),
+            Item::Size(0) => crate::t!("ink.thin"),
+            Item::Size(1) => crate::t!("ink.medium"),
+            Item::Size(_) => crate::t!("ink.thick"),
+            Item::Undo => crate::t!("ink.undo"),
+            Item::Redo => crate::t!("ink.redo"),
+            Item::Clear => crate::t!("ink.clear_all"),
+            Item::Who if s.everyone => crate::t!("ink.overlay_who_everyone"),
+            Item::Who => crate::t!("ink.overlay_who_only_me"),
+            Item::Close => crate::t!("ink.stop"),
         }
     }
 }

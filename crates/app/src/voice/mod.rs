@@ -531,7 +531,7 @@ impl Voice {
             let has_mic = shared.has_mic.load(Ordering::Relaxed);
             if !has_mic {
                 shared.mute.store(true, Ordering::Relaxed);
-                toast("Sem acesso ao microfone: você entrou só para ouvir.".into());
+                toast(crate::t!("voice.no_mic_listen").into());
             }
             // The server hands out the relay (TURN) with short-lived
             // credentials, which is what lets a pair of people with no
@@ -750,7 +750,7 @@ impl Voice {
             return Ok(());
         }
         if !self.shared.has_mic.load(Ordering::Relaxed) {
-            return Err("Nenhum microfone disponível.".into());
+            return Err(crate::t!("voice.no_mic").into());
         }
         self.mute = !self.mute;
         self.sounds
