@@ -14,7 +14,7 @@ exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-
 
 # The version lives only here: the app, the server and the installer read it.
 [workspace.package]
-version = "0.13.5"
+version = "0.13.6"
 edition = "2024"
 authors = ["Babu Tela"]
 publish = false

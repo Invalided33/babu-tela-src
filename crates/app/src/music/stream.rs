@@ -60,27 +60,71 @@ pub async fn play(
 }
 
 /// Downloads a progressive file (YouTube WebM/M4A, SoundCloud preview MP3)
-/// into a Vec. These top out around 10 MB for a 4-minute song, which fits.
+/// into a Vec. YouTube's `videoplayback` URL only serves one chunk per
+/// request without a `Range` header (hence why songs cut around 40 s if
+/// read in one go), so this always sends `Range: bytes=X-` and loops until
+/// the total from the server's `Content-Range` is in. SoundCloud's AAC
+/// progressive honours the same header, so the one code path handles both.
 async fn fetch_progressive(url: &str, stop: &Arc<AtomicBool>) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .timeout(READ_TIMEOUT)
         .build()
         .map_err(|e| format!("rede: {e}"))?;
-    let mut resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("rede: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("rede: {e}"))?;
-    let mut out = Vec::with_capacity(resp.content_length().unwrap_or(0) as usize);
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("rede: {e}"))? {
+    let mut out: Vec<u8> = Vec::new();
+    let mut total: Option<u64> = None;
+    loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(out);
         }
-        out.extend_from_slice(&chunk);
+        let range = format!("bytes={}-", out.len());
+        let resp = client
+            .get(url)
+            .header("Range", &range)
+            .send()
+            .await
+            .map_err(|e| format!("rede: {e}"))?;
+        let status = resp.status();
+        if status.as_u16() == 416 {
+            // No more bytes beyond what we have: that is the end.
+            return Ok(out);
+        }
+        if !status.is_success() {
+            return Err(format!("rede: {status}"));
+        }
+        if total.is_none() {
+            total = content_range_total(resp.headers())
+                .or_else(|| resp.content_length().map(|cl| out.len() as u64 + cl));
+            if let Some(t) = total {
+                out.reserve(t.saturating_sub(out.len() as u64).min(u64::from(u32::MAX)) as usize);
+            }
+        }
+        let before = out.len();
+        let mut resp = resp;
+        while let Some(piece) = resp.chunk().await.map_err(|e| format!("rede: {e}"))? {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(out);
+            }
+            out.extend_from_slice(&piece);
+        }
+        // Nothing new in this response: the server has no more to give.
+        if out.len() == before {
+            return Ok(out);
+        }
+        // Everything the server said there was is in: we are done.
+        if let Some(t) = total
+            && out.len() as u64 >= t
+        {
+            return Ok(out);
+        }
     }
-    Ok(out)
+}
+
+/// Reads the total length from a `Content-Range: bytes <start>-<end>/<total>`
+/// header. The `*` form means the server does not know and sends `None`.
+fn content_range_total(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    let v = headers.get("content-range")?.to_str().ok()?;
+    let total = v.split('/').nth(1)?.trim();
+    (total != "*").then(|| total.parse().ok()).flatten()
 }
 
 /// Reads an HLS .m3u8, downloads every segment and concatenates them (an
@@ -251,6 +295,14 @@ impl Resampler {
 /// jumping ahead of real time.
 const CHUNK_MS: u64 = 10;
 
+/// How many `CHUNK_MS` chunks go in a burst before pacing starts. The
+/// local mixer waits for `PeerAudio::PRIME` (60 ms of stereo) to be
+/// queued before it starts playing, so a lead below that would never
+/// make the DJ hear the song; a lead above `TRIM_ABOVE` (another 30 ms)
+/// would make the mixer start trimming quiet stretches. 70 ms clears
+/// both.
+const LEAD_CHUNKS: u64 = 7;
+
 fn decode(
     data: Vec<u8>,
     ext: &str,
@@ -337,10 +389,12 @@ fn decode(
         while pending.len() >= CHUNK * 2 {
             let chunk: Vec<f32> = pending.drain(..CHUNK * 2).collect();
             // Hold on until this chunk's slot in real time, so the local
-            // mixer and the peers' jitter buffers do not drown. One
-            // chunk-worth of lead keeps the mixer never dry.
+            // mixer and the peers' jitter buffers do not drown. The first
+            // `LEAD_CHUNKS` chunks go in a burst to prime both.
             let deadline = started_at
-                + std::time::Duration::from_millis(chunks_out.saturating_sub(1) * CHUNK_MS);
+                + std::time::Duration::from_millis(
+                    chunks_out.saturating_sub(LEAD_CHUNKS) * CHUNK_MS,
+                );
             if let Some(wait) = deadline.checked_duration_since(std::time::Instant::now()) {
                 std::thread::sleep(wait);
             }
@@ -435,6 +489,35 @@ mod tests {
         // One doubling produces at least 3 output frames from 2 input
         // frames; keep room for the resampler's windowing.
         assert!(out.len() >= 4, "{}", out.len());
+    }
+
+    fn headers(items: &[(&str, &str)]) -> reqwest::header::HeaderMap {
+        let mut m = reqwest::header::HeaderMap::new();
+        for (k, v) in items {
+            m.insert(
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                reqwest::header::HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        m
+    }
+
+    #[test]
+    fn content_range_reads_the_total() {
+        let h = headers(&[("Content-Range", "bytes 0-499/5000000")]);
+        assert_eq!(content_range_total(&h), Some(5_000_000));
+    }
+
+    #[test]
+    fn content_range_without_a_total_is_none() {
+        let h = headers(&[("Content-Range", "bytes 0-499/*")]);
+        assert_eq!(content_range_total(&h), None);
+    }
+
+    #[test]
+    fn no_content_range_is_none() {
+        let h = headers(&[]);
+        assert_eq!(content_range_total(&h), None);
     }
 
     #[test]
