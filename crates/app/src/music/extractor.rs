@@ -101,7 +101,7 @@ pub fn classify(link: &str) -> Option<Service> {
 /// what came back. YouTube asking for a sign-in means the fallback through
 /// the browsers' cookies gets tried, in [`BROWSERS`] order.
 pub async fn extract(link: &str, tools: &Tools) -> Result<Extracted, String> {
-    let service = classify(link).ok_or_else(|| "só links do YouTube e do SoundCloud".to_owned())?;
+    let service = classify(link).ok_or_else(|| crate::t!("music.only_links").to_owned())?;
 
     // First try without cookies: for most videos it works, and nobody's
     // account gets flagged for nothing.
@@ -129,10 +129,9 @@ pub async fn extract(link: &str, tools: &Tools) -> Result<Extracted, String> {
             // Nothing worked. The original YouTube error is clearer than
             // the last browser's "could not find chrome": show that one.
             None => {
-                return Err(format!(
-                    "YouTube pediu login. Entre no YouTube pelo Chrome, Edge, Firefox, Brave, \
-                     Opera ou Vivaldi e tente de novo ({}).",
-                    trimmed_error(&original)
+                return Err(crate::tf!(
+                    "music.youtube_login",
+                    detail = trimmed_error(&original)
                 ));
             }
         }

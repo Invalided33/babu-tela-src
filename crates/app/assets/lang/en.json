@@ -644,5 +644,11 @@
 
   "main.start_failed": "Babu Tela couldn't start.\n\n{e}",
   "main.tor_failed": "Babu Tela couldn't start Tor.\n\n{e}\n\nOpen without Tor? The server will see your IP. (\"No\" closes the app.)",
-  "main.window_failed": "Babu Tela couldn't open the window.\n\n{e}\n\nIf the problem continues, update your video driver and try again."
+  "main.window_failed": "Babu Tela couldn't open the window.\n\n{e}\n\nIf the problem continues, update your video driver and try again.",
+
+  "music.only_links": "Only YouTube and SoundCloud links.",
+  "music.already_fetching": "Already fetching another song. Hold on a moment.",
+  "music.read_failed": "Couldn't read the song: {e}",
+  "music.stopped": "Music stopped: {e}",
+  "music.youtube_login": "YouTube asked for a login. Sign in to YouTube in Chrome, Edge, Firefox, Brave, Opera or Vivaldi and try again ({detail})."
 }

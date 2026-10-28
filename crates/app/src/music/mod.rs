@@ -211,11 +211,11 @@ impl Music {
             return;
         }
         if extractor::classify(&url).is_none() {
-            (self.toast)("Só links do YouTube e do SoundCloud.".into());
+            (self.toast)(crate::t!("music.only_links").into());
             return;
         }
         if self.extracting.swap(true, Ordering::Relaxed) {
-            (self.toast)("Já estou buscando outra música. Espera um pouquinho.".into());
+            (self.toast)(crate::t!("music.already_fetching").into());
             return;
         }
         let this = self.clone();
@@ -223,7 +223,7 @@ impl Music {
             let res = this.extract_and_post(url, by_name, me).await;
             this.extracting.store(false, Ordering::Relaxed);
             if let Err(e) = res {
-                (this.toast)(format!("Música não pôde ser lida: {e}"));
+                (this.toast)(crate::tf!("music.read_failed", e = e));
             }
             this.ctx.request_repaint();
         });
@@ -395,7 +395,7 @@ impl Music {
             let tools = match ytdlp::ensure().await {
                 Ok(t) => t,
                 Err(e) => {
-                    (this.toast)(format!("Música parou: {e}"));
+                    (this.toast)(crate::tf!("music.stopped", e = e));
                     this.ctx.request_repaint();
                     return;
                 }
@@ -412,7 +412,7 @@ impl Music {
                 None => match extractor::extract(&item.url, &tools).await {
                     Ok(e) => e,
                     Err(e) => {
-                        (this.toast)(format!("Música parou: {e}"));
+                        (this.toast)(crate::tf!("music.stopped", e = e));
                         this.skip(&item.id);
                         return;
                     }

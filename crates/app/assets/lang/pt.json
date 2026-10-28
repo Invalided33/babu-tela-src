@@ -644,5 +644,11 @@
 
   "main.start_failed": "O Babu Tela não conseguiu iniciar.\n\n{e}",
   "main.tor_failed": "O Babu Tela não conseguiu ligar o Tor.\n\n{e}\n\nAbrir sem o Tor? O servidor vai ver o seu IP. (\"Não\" fecha o app.)",
-  "main.window_failed": "O Babu Tela não conseguiu abrir a janela.\n\n{e}\n\nSe o problema continuar, atualize o driver de vídeo e tente de novo."
+  "main.window_failed": "O Babu Tela não conseguiu abrir a janela.\n\n{e}\n\nSe o problema continuar, atualize o driver de vídeo e tente de novo.",
+
+  "music.only_links": "Só links do YouTube e do SoundCloud.",
+  "music.already_fetching": "Já estou buscando outra música. Espera um pouquinho.",
+  "music.read_failed": "Música não pôde ser lida: {e}",
+  "music.stopped": "Música parou: {e}",
+  "music.youtube_login": "YouTube pediu login. Entre no YouTube pelo Chrome, Edge, Firefox, Brave, Opera ou Vivaldi e tente de novo ({detail})."
 }
