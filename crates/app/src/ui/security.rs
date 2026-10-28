@@ -9,6 +9,7 @@ use super::widgets::{self, Button};
 use crate::core::{Core, Modal};
 use crate::e2e::{PinView, keys, provision};
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 /// On an old PC: a new one asks for the keys, and its code is typed here.
 pub fn approve_device(
@@ -18,12 +19,8 @@ pub fn approve_device(
     focus: bool,
     acts: &mut Acts,
 ) {
-    widgets::h3(ui, "Aprovar um PC novo");
-    widgets::sub(
-        ui,
-        "Um PC entrou na sua conta e pediu as chaves para ler e enviar mensagens cifradas. \
-         Digite o código que aparece nele. Se não foi você, recuse: nada é enviado sem o código certo.",
-    );
+    widgets::h3(ui, t!("security.approve_title"));
+    widgets::sub(ui, t!("security.approve_body"));
     ui.add_space(12.0);
     let resp = ui.add(
         TextEdit::singleline(code)
@@ -40,10 +37,10 @@ pub fn approve_device(
     let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     widgets::error_line(ui, error.map(str::to_owned).as_ref());
     foot(ui, |ui| {
-        if Button::primary("Aprovar").show(ui).clicked() || enter {
+        if Button::primary(t!("security.approve")).show(ui).clicked() || enter {
             acts.later(Core::approve_device);
         }
-        if Button::ghost("Recusar").show(ui).clicked() {
+        if Button::ghost(t!("security.decline")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -51,12 +48,8 @@ pub fn approve_device(
 
 /// On a new PC: the code to type on an old one, or a new identity.
 pub fn new_device(ui: &mut Ui, core: &Core, acts: &mut Acts) {
-    widgets::h3(ui, "Este PC precisa das chaves da sua conta");
-    widgets::sub(
-        ui,
-        "Suas mensagens são cifradas de ponta a ponta: só os seus PCs têm as chaves, nem o \
-         servidor. Abra o Babu Tela num PC onde você já entrou e digite lá este código:",
-    );
+    widgets::h3(ui, t!("security.new_device_title"));
+    widgets::sub(ui, t!("security.new_device_body"));
     ui.add_space(14.0);
     let code = core
         .provision
@@ -72,23 +65,19 @@ pub fn new_device(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     });
     ui.add_space(14.0);
     foot(ui, |ui| {
-        if Button::primary("Pedir de novo").show(ui).clicked() {
+        if Button::primary(t!("security.ask_again")).show(ui).clicked() {
             acts.later(Core::ask_for_keys_again);
         }
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
     ui.add_space(18.0);
     widgets::divider(ui);
     ui.add_space(10.0);
-    widgets::sub(
-        ui,
-        "Não tem mais nenhum desses PCs? Crie uma identidade nova: o que foi enviado antes não \
-         poderá ser lido aqui, e quem conversa com você verá que a sua chave mudou.",
-    );
+    widgets::sub(ui, t!("security.no_devices"));
     ui.add_space(8.0);
-    if Button::danger("Criar uma identidade nova")
+    if Button::danger(t!("security.new_identity"))
         .show(ui)
         .clicked()
     {
@@ -102,46 +91,30 @@ pub fn new_device(ui: &mut Ui, core: &Core, acts: &mut Acts) {
 /// The security number with `uid`, to compare with them outside the app.
 pub fn number(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
     let name = core.user(uid).name().to_owned();
-    widgets::h3(ui, &format!("Código de segurança com {name}"));
+    widgets::h3(ui, &tf!("security.number_title", name = name));
     let Some((now, changed)) = core.security_number(uid) else {
-        widgets::sub(
-            ui,
-            "Este PC ainda não tem a chave dessa pessoa: ela aparece quando vocês conversarem.",
-        );
+        widgets::sub(ui, t!("security.no_key_yet"));
         foot(ui, |ui| {
-            if Button::ghost("Fechar").show(ui).clicked() {
+            if Button::ghost(t!("common.close")).show(ui).clicked() {
                 acts.later(Core::close_modal);
             }
         });
         return;
     };
-    widgets::sub(
-        ui,
-        &format!(
-            "Compare este número com o que aparece no app de {name}, pessoalmente ou numa \
-             ligação. Se for o mesmo, ninguém, nem o servidor, está no meio da conversa de vocês."
-        ),
-    );
+    widgets::sub(ui, &tf!("security.compare_body", name = name));
     ui.add_space(12.0);
     show_number(ui, &now);
     let view = core.e2e.pin_view(uid);
     ui.add_space(10.0);
     if let Some(new) = changed {
-        ui.label(
-            RichText::new(format!(
-                "A chave de {name} mudou. Pode ser que {name} tenha trocado de PC sem levar as \
-                 chaves, ou que alguém esteja tentando se passar por {name}. Até você aceitar, \
-                 nada seu vai para a chave nova. O número novo seria:"
-            ))
-            .color(WARN),
-        );
+        ui.label(RichText::new(tf!("security.key_changed", name = name)).color(WARN));
         ui.add_space(6.0);
         show_number(ui, &new);
         foot(ui, |ui| {
-            if Button::danger("Aceitar a nova chave").show(ui).clicked() {
+            if Button::danger(t!("security.accept_key")).show(ui).clicked() {
                 acts.later(move |c| c.accept_key_change(uid));
             }
-            if Button::ghost("Fechar").show(ui).clicked() {
+            if Button::ghost(t!("common.close")).show(ui).clicked() {
                 acts.later(Core::close_modal);
             }
         });
@@ -150,31 +123,25 @@ pub fn number(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
     let verified = matches!(view, PinView::Pinned { verified: true });
     ui.label(
         RichText::new(if verified {
-            "Você marcou este número como conferido."
+            t!("security.verified_yes")
         } else {
-            "Ainda não conferido."
+            t!("security.verified_no")
         })
         .color(MUTED),
     );
     if core.e2e.in_record(uid) {
-        ui.label(
-            RichText::new(format!(
-                "É a chave mais nova de {name} no registro público de chaves, que o app de {name} \
-                 vigia e que os apps de quem conversa comparam entre si."
-            ))
-            .color(MUTED),
-        );
+        ui.label(RichText::new(tf!("security.in_record", name = name)).color(MUTED));
     }
     foot(ui, |ui| {
         let label = if verified {
-            "Desmarcar"
+            t!("security.unmark")
         } else {
-            "Marcar como conferido"
+            t!("security.mark_verified")
         };
         if Button::primary(label).show(ui).clicked() {
             acts.later(move |c| c.mark_verified(uid, !verified));
         }
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });

@@ -11,6 +11,7 @@ use crate::core::{Core, Modal};
 use crate::icons::Icon;
 use crate::media::{self, Status};
 use crate::model::{Attachment, Kind};
+use crate::t;
 use crate::theme::{self, *};
 
 /// The widest an attachment gets in the chat.
@@ -45,7 +46,7 @@ pub fn audio(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
             let name = widgets::ellipsis(ui, &a.name, theme::small(), TEXT)
                 .interact(Sense::click())
                 .on_hover_cursor(CursorIcon::PointingHand)
-                .on_hover_text("Abrir");
+                .on_hover_text(t!("chat.open"));
             if name.clicked() {
                 super::chat::open_attachment(acts, &core.api, a);
             }
@@ -88,7 +89,7 @@ pub fn video(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts, max: Vec
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Não deu para tocar este vídeo aqui.\nClique para abrir no navegador.",
+                t!("player.cant_play_video"),
                 theme::small(),
                 MUTED,
             );
@@ -129,7 +130,7 @@ pub fn video(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts, max: Vec
     );
     mute_button(ui, player, &a.url, acts);
     if !enlarged {
-        let expand = widgets::icon_button(ui, Icon::Expand, 28.0, Ib::Bare, "Ampliar");
+        let expand = widgets::icon_button(ui, Icon::Expand, 28.0, Ib::Bare, t!("player.enlarge"));
         if expand.clicked() {
             let a = a.clone();
             acts.later(move |c| c.open_modal(Modal::Player { attachment: a }));
@@ -160,9 +161,9 @@ fn play_button(
 ) {
     let playing = player.is_some_and(media::Player::playing);
     let (icon, tip) = if playing {
-        (Icon::Pause, "Pausar")
+        (Icon::Pause, t!("player.pause"))
     } else {
-        (Icon::Play, "Tocar")
+        (Icon::Play, t!("player.play"))
     };
     let style = if playing { Ib::On } else { Ib::Normal };
     if widgets::icon_button(ui, icon, side, style, tip).clicked() {
@@ -173,9 +174,9 @@ fn play_button(
 fn mute_button(ui: &mut Ui, player: Option<&media::Player>, url: &str, acts: &mut Acts) {
     let muted = player.is_some_and(media::Player::muted);
     let (icon, tip) = if muted {
-        (Icon::VolumeOff, "Ativar o som")
+        (Icon::VolumeOff, t!("player.unmute"))
     } else {
-        (Icon::Volume, "Silenciar")
+        (Icon::Volume, t!("player.mute"))
     };
     if widgets::icon_button(ui, icon, 28.0, Ib::Bare, tip).clicked() && player.is_some() {
         let url = url.to_owned();

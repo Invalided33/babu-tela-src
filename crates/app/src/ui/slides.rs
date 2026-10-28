@@ -24,6 +24,7 @@ use crate::model::{Video, VoiceUser};
 use crate::slides::{Owner, View};
 use crate::theme::{self, ACCENT, BG2, BG3, BG4, FAINT, MUTED, RADIUS_SM, TEXT, WARN};
 use crate::voice::plan::{self, Layer};
+use crate::{t, tf};
 
 /// The bar across the top of the view, and the space between its parts.
 const BAR_H: f32 = 34.0;
@@ -102,7 +103,7 @@ pub fn presenting_banner(ui: &mut Ui, core: &Core, users: &[VoiceUser]) {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.add(Icon::Presentation.tinted(crate::theme::ACCENT));
                 ui.label(
-                    egui::RichText::new(format!("{} está apresentando", user.name()))
+                    egui::RichText::new(tf!("slides.presenting_by", name = user.name()))
                         .font(crate::theme::bold(14.0))
                         .color(crate::theme::TEXT),
                 );
@@ -115,7 +116,7 @@ pub fn presenting_banner(ui: &mut Ui, core: &Core, users: &[VoiceUser]) {
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if crate::ui::widgets::Button::primary("Assistir")
+                    if crate::ui::widgets::Button::primary(t!("slides.watch"))
                         .small()
                         .show(ui)
                         .clicked()
@@ -211,7 +212,7 @@ fn apply(nav: Nav, at: usize, count: usize) -> usize {
 /// ◀ "5 de 19" ▶, centred in `rect`: the slide to go to, if one was
 /// clicked.
 fn steps(ui: &mut Ui, rect: Rect, at: usize, count: usize, side: f32, style: Ib) -> Option<usize> {
-    let label = format!("{} de {}", at + 1, count);
+    let label = tf!("common.x_of_y", sent = at + 1, total = count);
     let font = theme::bold(14.0);
     let text_w = ui
         .painter()
@@ -227,13 +228,13 @@ fn steps(ui: &mut Ui, rect: Rect, at: usize, count: usize, side: f32, style: Ib)
     );
     row.spacing_mut().item_spacing.x = 12.0;
     let mut to = None;
-    let back = widgets::icon_button(&mut row, Icon::Left, side, style, "Slide anterior");
+    let back = widgets::icon_button(&mut row, Icon::Left, side, style, t!("slides.prev_slide"));
     if back.clicked() {
         back.surrender_focus();
         to = at.checked_sub(1);
     }
     row.label(RichText::new(label).font(font).color(TEXT));
-    let next = widgets::icon_button(&mut row, Icon::Right, side, style, "Próximo slide");
+    let next = widgets::icon_button(&mut row, Icon::Right, side, style, t!("slides.next_slide"));
     if next.clicked() {
         next.surrender_focus();
         to = (at + 1 < count).then_some(at + 1);
@@ -413,7 +414,7 @@ fn presenter(ui: &mut Ui, core: &Core, v: &View, cid: i64, acts: &mut Acts) {
         );
         ui.add_space((rest.height() / 2.0 - 30.0).max(0.0));
         ui.add(egui::Spinner::new().size(24.0).color(MUTED));
-        ui.label(RichText::new(format!("Abrindo {}…", v.name)).color(MUTED));
+        ui.label(RichText::new(tf!("slides.opening", name = v.name)).color(MUTED));
         return;
     }
     let strip_h = (full.height() * 0.15).clamp(64.0, 104.0);
@@ -450,7 +451,7 @@ fn presenter(ui: &mut Ui, core: &Core, v: &View, cid: i64, acts: &mut Acts) {
         ui.painter().text(
             shown.center(),
             egui::Align2::CENTER_CENTER,
-            "Este slide não pôde ser desenhado.",
+            t!("slides.slide_failed"),
             theme::bold(15.0),
             Color32::from_gray(0x50),
         );
@@ -477,20 +478,24 @@ fn presenter_bar(ui: &mut Ui, v: &View, rect: Rect, cid: i64, acts: &mut Acts) {
     ui.spacing_mut().item_spacing.x = 8.0;
     ui.add(Icon::Presentation.tinted(ACCENT));
     ui.label(
-        RichText::new("Você está apresentando")
+        RichText::new(t!("slides.you_presenting"))
             .font(theme::bold(14.0))
             .color(TEXT),
     );
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        if Button::danger("Parar de apresentar")
+        if Button::danger(t!("slides.stop_presenting"))
             .small()
             .show(ui)
             .clicked()
         {
             acts.later(|c| c.voice.stop_presenting());
         }
-        if Button::ghost("Ver pessoas").small().show(ui).clicked() {
+        if Button::ghost(t!("slides.view_people"))
+            .small()
+            .show(ui)
+            .clicked()
+        {
             ui.data_mut(|d| d.insert_temp(set_aside(cid), v.id));
         }
         if v.count > 0 {
@@ -507,15 +512,16 @@ fn presenter_bar(ui: &mut Ui, v: &View, rect: Rect, cid: i64, acts: &mut Acts) {
 fn status(v: &View) -> Option<String> {
     let ready = v.ready.iter().filter(|r| **r).count();
     if v.count > 0 && !v.drawn {
-        return Some(format!("Preparando os slides: {ready} de {}", v.count));
+        return Some(tf!("slides.preparing", ready = ready, total = v.count));
     }
     let waiting = v.people - v.people_done.min(v.people);
     if waiting > 0 {
-        let who = if waiting == 1 { "pessoa" } else { "pessoas" };
-        return Some(format!(
-            "Enviando para {waiting} {who}: {:.0}%",
-            (v.sent * 100.0).floor()
-        ));
+        let pct = (v.sent * 100.0).floor();
+        return Some(if waiting == 1 {
+            tf!("slides.sending_one", pct = pct)
+        } else {
+            tf!("slides.sending_many", n = waiting, pct = pct)
+        });
     }
     None
 }
@@ -543,7 +549,7 @@ fn clock(ui: &mut Ui, v: &View) {
             .selectable(false),
         )
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text("Tempo de apresentação: clique para zerar");
+        .on_hover_text(t!("slides.clock_tip"));
     ui.add(Icon::Clock.image(crate::icons::SMALL, MUTED));
     if resp.clicked() {
         ui.data_mut(|d| d.insert_temp(id, Instant::now()));
@@ -560,7 +566,7 @@ fn next_and_notes(ui: &mut Ui, core: &Core, v: &View, rect: Rect) {
             .max_rect(rect)
             .layout(Layout::top_down(Align::Min)),
     );
-    widgets::caption(&mut ui, "Próximo slide");
+    widgets::caption(&mut ui, t!("slides.next_slide"));
     ui.add_space(4.0);
     let aspect = natural(v).y / natural(v).x.max(1.0);
     let (room, _) = ui.allocate_exact_size(
@@ -578,7 +584,7 @@ fn next_and_notes(ui: &mut Ui, core: &Core, v: &View, rect: Rect) {
         ui.painter().text(
             room.center(),
             egui::Align2::CENTER_CENTER,
-            "Fim da apresentação",
+            t!("slides.end_of_presentation"),
             theme::small(),
             FAINT,
         );
@@ -588,7 +594,7 @@ fn next_and_notes(ui: &mut Ui, core: &Core, v: &View, rect: Rect) {
     if ui.available_height() < 60.0 {
         return;
     }
-    widgets::caption(&mut ui, "Anotações");
+    widgets::caption(&mut ui, t!("slides.notes"));
     ui.add_space(4.0);
     let notes = core.voice.slides().notes(v.at);
     ScrollArea::vertical()
@@ -596,7 +602,7 @@ fn next_and_notes(ui: &mut Ui, core: &Core, v: &View, rect: Rect) {
         .auto_shrink([false, false])
         .show(&mut ui, |ui| {
             if notes.is_empty() {
-                ui.label(RichText::new("Sem anotações neste slide.").color(FAINT));
+                ui.label(RichText::new(t!("slides.no_notes")).color(FAINT));
             } else {
                 ui.label(
                     RichText::new(notes)
@@ -828,7 +834,7 @@ fn viewer_bar(
     let (avatar, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
     widgets::paint_avatar(&ui, core, &user, avatar, false, BG2);
     ui.label(
-        RichText::new(format!("{} está apresentando", user.name()))
+        RichText::new(tf!("slides.presenting_by", name = user.name()))
             .font(theme::bold(14.0))
             .color(TEXT),
     );
@@ -836,33 +842,37 @@ fn viewer_bar(
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         // Stop watching this presentation (go back to tiles).
-        if Button::danger("Parar de assistir")
+        if Button::danger(t!("stage.stop_watching"))
             .small()
             .show(ui)
             .clicked()
         {
             set_watching(ui.ctx(), None);
         }
-        if Button::ghost("Ver pessoas").small().show(ui).clicked() {
+        if Button::ghost(t!("slides.view_people"))
+            .small()
+            .show(ui)
+            .clicked()
+        {
             ui.data_mut(|d| d.insert_temp(set_aside(cid), v.id));
         }
         // Fullscreen, the same way as the call view's (stage.rs).
         let fullscreen = super::stage::is_fullscreen(ui.ctx());
         let (fs_icon, fs_tip) = if fullscreen {
-            (Icon::ZoomOut, "Sair da tela cheia (Esc)")
+            (Icon::ZoomOut, t!("stage.exit_fullscreen"))
         } else {
-            (Icon::Expand, "Tela cheia")
+            (Icon::Expand, t!("stage.fullscreen"))
         };
         if widgets::icon_button(ui, fs_icon, 28.0, Ib::Bare, fs_tip).clicked() {
             super::stage::set_fullscreen(ui.ctx(), !fullscreen);
         }
         if away {
-            back = Button::primary("Voltar ao apresentador")
+            back = Button::primary(t!("slides.back_to_presenter"))
                 .small()
                 .show(ui)
                 .clicked();
             ui.label(
-                RichText::new(format!("o apresentador está no slide {}", v.at + 1))
+                RichText::new(tf!("slides.presenter_on_slide", n = v.at + 1))
                     .font(theme::small())
                     .color(WARN),
             );
@@ -902,7 +912,8 @@ fn controls(ui: &mut Ui, v: &View, area: Rect, at: usize, b: &mut Browse) {
             .layout(Layout::right_to_left(Align::Center)),
     );
     row.spacing_mut().item_spacing.x = 4.0;
-    let zoom_in = widgets::icon_button(&mut row, Icon::ZoomIn, side, Ib::Bare, "Ampliar");
+    let zoom_in =
+        widgets::icon_button(&mut row, Icon::ZoomIn, side, Ib::Bare, t!("slides.zoom_in"));
     if zoom_in.clicked() {
         zoom_in.surrender_focus();
         b.zoom = (b.zoom * 1.25).min(MAX_ZOOM);
@@ -918,11 +929,17 @@ fn controls(ui: &mut Ui, v: &View, area: Rect, at: usize, b: &mut Browse) {
             .selectable(false),
         )
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text("Ajustar à tela");
+        .on_hover_text(t!("slides.fit_to_screen"));
     if percent.clicked() {
         b.zoom = 1.0;
     }
-    let zoom_out = widgets::icon_button(&mut row, Icon::ZoomOut, side, Ib::Bare, "Reduzir");
+    let zoom_out = widgets::icon_button(
+        &mut row,
+        Icon::ZoomOut,
+        side,
+        Ib::Bare,
+        t!("slides.zoom_out"),
+    );
     if zoom_out.clicked() {
         zoom_out.surrender_focus();
         b.zoom = (b.zoom / 1.25).max(1.0);

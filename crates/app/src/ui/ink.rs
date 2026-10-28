@@ -16,6 +16,7 @@ use super::widgets::{self, Ib};
 use crate::core::{Core, Pop, PopKind};
 use crate::icons::Icon;
 use crate::ink::{self, COLORS, Ink, Page, Pen, SIZES, Surface, Tool};
+use crate::t;
 use crate::theme::{self, ACCENT, MUTED, TEXT};
 
 /// The tools, in the toolbar's order.
@@ -254,7 +255,7 @@ fn text_input(ui: &mut Ui, ink: &Ink, page: Page, picture: Rect, clip: Rect) {
                 .background_color(Color32::TRANSPARENT)
                 .char_limit(crate::ink::MAX_TEXT_BYTES)
                 .desired_width(inner.width())
-                .hint_text(egui::RichText::new("Digite, Enter escreve").color(MUTED));
+                .hint_text(egui::RichText::new(t!("ink.text_hint")).color(MUTED));
             ui.put(inner, text_edit)
         })
         .inner;
@@ -320,9 +321,9 @@ fn keys(ui: &Ui, ink: &Ink) {
 
 /// "Anotar", at the top right of the picture while the pointer is on it.
 fn start(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect) {
-    let galley = ui
-        .painter()
-        .layout_no_wrap("Anotar".to_owned(), theme::bold(13.0), TEXT);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(t!("ink.annotate").to_owned(), theme::bold(13.0), TEXT);
     let size = vec2(galley.size().x + 44.0, 30.0);
     let rect = Rect::from_min_size(pos2(clip.right() - size.x - 10.0, clip.top() + 10.0), size);
     let resp = ui.interact(
@@ -344,7 +345,7 @@ fn start(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect) {
     );
     if resp
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text("Desenhar sobre o que está sendo compartilhado")
+        .on_hover_text(t!("ink.annotate_tip"))
         .clicked()
     {
         ink.open(surface);
@@ -422,7 +423,7 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
     );
     if resp
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text("Cor e espessura")
+        .on_hover_text(t!("ink.color_width"))
         .clicked()
     {
         toggle_pop(acts, PopKind::InkColor, swatch);
@@ -432,7 +433,7 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
         &mut row,
         Icon::Undo,
         Ib::Bare,
-        "Desfazer (Ctrl+Z)",
+        t!("ink.undo"),
         ink.can_undo(),
     ) {
         ink.undo();
@@ -441,7 +442,7 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
         &mut row,
         Icon::Redo,
         Ib::Bare,
-        "Refazer (Ctrl+Y)",
+        t!("ink.redo"),
         ink.can_redo(),
     ) {
         ink.redo();
@@ -450,7 +451,7 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
     let (mine, any) = ink.has_strokes(surface);
     if owner {
         let at = row.cursor().min;
-        if button(&mut row, Icon::Trash, Ib::Bare, "Limpar", any) {
+        if button(&mut row, Icon::Trash, Ib::Bare, t!("ink.clear"), any) {
             toggle_pop(
                 acts,
                 PopKind::InkClear(surface),
@@ -463,7 +464,7 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
         } else {
             Icon::UsersOff
         };
-        if button(&mut row, who, Ib::Bare, "Quem pode anotar", true) {
+        if button(&mut row, who, Ib::Bare, t!("ink.who_can"), true) {
             toggle_pop(
                 acts,
                 PopKind::InkWho(surface),
@@ -474,15 +475,15 @@ fn toolbar(ui: &mut Ui, ink: &Ink, surface: Surface, clip: Rect, acts: &mut Acts
         &mut row,
         Icon::Trash,
         Ib::Bare,
-        "Limpar as minhas anotações",
+        t!("ink.clear_mine_tip"),
         mine,
     ) {
         ink.clear_surface(surface, false);
     }
-    if button(&mut row, Icon::Save, Ib::Bare, "Salvar imagem", true) {
+    if button(&mut row, Icon::Save, Ib::Bare, t!("ink.save_image"), true) {
         acts.later(move |c| c.save_annotation(clip));
     }
-    if button(&mut row, Icon::X, Ib::Bare, "Parar de anotar (Esc)", true) {
+    if button(&mut row, Icon::X, Ib::Bare, t!("ink.stop"), true) {
         ink.close();
     }
 }
@@ -512,7 +513,7 @@ pub fn color_pop(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     } else {
         pen.tool
     };
-    widgets::caption(ui, "Cor");
+    widgets::caption(ui, t!("ink.color"));
     ui.add_space(4.0);
     for row in COLORS.chunks(4).enumerate() {
         ui.horizontal(|ui| {
@@ -546,11 +547,14 @@ pub fn color_pop(ui: &mut Ui, core: &Core, acts: &mut Acts) {
         });
     }
     ui.add_space(8.0);
-    widgets::caption(ui, "Espessura");
+    widgets::caption(ui, t!("ink.thickness"));
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        for (i, label) in ["Fina", "Média", "Grossa"].into_iter().enumerate() {
+        for (i, label) in [t!("ink.thin"), t!("ink.medium"), t!("ink.thick")]
+            .into_iter()
+            .enumerate()
+        {
             let (rect, resp) = ui.allocate_exact_size(vec2(SWATCH + 10.0, SWATCH), Sense::click());
             let bg = if i == pen.size {
                 theme::BG4
@@ -587,11 +591,11 @@ pub fn color_pop(ui: &mut Ui, core: &Core, acts: &mut Acts) {
 pub fn clear_pop(ui: &mut Ui, core: &Core, surface: Surface, acts: &mut Acts) {
     let ink = core.voice.ink();
     let (mine, _) = ink.has_strokes(surface);
-    if mine && super::modals::menu_item(ui, "Limpar as minhas", false) {
+    if mine && super::modals::menu_item(ui, t!("ink.clear_mine"), false) {
         ink.clear_surface(surface, false);
         acts.later(|c| c.pop = None);
     }
-    if super::modals::menu_item(ui, "Limpar tudo", true) {
+    if super::modals::menu_item(ui, t!("ink.clear_all"), true) {
         ink.clear_surface(surface, true);
         acts.later(|c| c.pop = None);
     }
@@ -601,11 +605,11 @@ pub fn clear_pop(ui: &mut Ui, core: &Core, surface: Surface, acts: &mut Acts) {
 pub fn who_pop(ui: &mut Ui, core: &Core, surface: Surface, acts: &mut Acts) {
     let ink = core.voice.ink();
     let everyone = ink.everyone(surface);
-    if super::modals::menu_check(ui, "Todos podem anotar", everyone) {
+    if super::modals::menu_check(ui, t!("ink.everyone"), everyone) {
         ink.set_everyone(surface, true);
         acts.later(|c| c.pop = None);
     }
-    if super::modals::menu_check(ui, "Só eu posso anotar", !everyone) {
+    if super::modals::menu_check(ui, t!("ink.only_me"), !everyone) {
         ink.set_everyone(surface, false);
         acts.later(|c| c.pop = None);
     }

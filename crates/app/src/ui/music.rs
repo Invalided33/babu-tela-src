@@ -10,15 +10,12 @@ use crate::core::Core;
 use crate::icons::Icon;
 use crate::music::{Item, State, View};
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 /// The modal body.
 pub fn modal(ui: &mut Ui, core: &mut Core, link: &mut String, focus: bool, acts: &mut Acts) {
-    widgets::h3(ui, "Música na chamada");
-    widgets::sub(
-        ui,
-        "Qualquer um da chamada pode entrar uma música. O computador de quem colocou o link \
-         puxa a música e manda para todos.",
-    );
+    widgets::h3(ui, t!("music.title"));
+    widgets::sub(ui, t!("music.subtitle"));
 
     // "Entre numa chamada" check (even outside a call the modal is useful
     // for showing the help text, but we gray out the input).
@@ -41,10 +38,7 @@ pub fn modal(ui: &mut Ui, core: &mut Core, link: &mut String, focus: bool, acts:
 fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
     let Some(item) = view.items.front() else {
         ui.add_space(10.0);
-        widgets::sub(
-            ui,
-            "Nada tocando. Cole um link do YouTube ou do SoundCloud para começar.",
-        );
+        widgets::sub(ui, t!("music.nothing_playing"));
         return;
     };
     ui.add_space(8.0);
@@ -58,7 +52,7 @@ fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(
-                        egui::RichText::new("Tocando agora")
+                        egui::RichText::new(t!("music.now_playing"))
                             .font(theme::small())
                             .color(ACCENT),
                     );
@@ -79,7 +73,7 @@ fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
                     let total = item
                         .duration
                         .map(format_time)
-                        .unwrap_or_else(|| "ao vivo".into());
+                        .unwrap_or_else(|| t!("music.live").to_owned());
                     ui.label(
                         egui::RichText::new(format!("{elapsed} / {total}"))
                             .font(theme::tiny())
@@ -89,14 +83,20 @@ fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let id = item.id.clone();
-                    if widgets::icon_button(ui, Icon::Right, 34.0, widgets::Ib::Bare, "Pular")
-                        .clicked()
+                    if widgets::icon_button(
+                        ui,
+                        Icon::Right,
+                        34.0,
+                        widgets::Ib::Bare,
+                        t!("music.skip"),
+                    )
+                    .clicked()
                     {
                         acts.later(move |c| c.music.skip(&id));
                     }
                     let (icon, label): (Icon, &str) = match view.state {
-                        State::Playing => (Icon::Pause, "Pausar"),
-                        State::Paused => (Icon::Play, "Tocar"),
+                        State::Playing => (Icon::Pause, t!("music.pause")),
+                        State::Paused => (Icon::Play, t!("music.play")),
                     };
                     if widgets::icon_button(ui, icon, 34.0, widgets::Ib::Bare, label).clicked() {
                         let paused = view.state == State::Playing;
@@ -133,7 +133,7 @@ fn coming_up(ui: &mut Ui, view: &View, acts: &mut Acts, _core: &Core) {
     }
     ui.add_space(10.0);
     ui.label(
-        egui::RichText::new(format!("Fila ({})", view.items.len() - 1))
+        egui::RichText::new(tf!("music.queue_count", n = view.items.len() - 1))
             .font(theme::bold(13.0))
             .color(TEXT),
     );
@@ -171,7 +171,7 @@ fn queue_row(ui: &mut Ui, item: &Item, acts: &mut Acts) {
                         Icon::Trash,
                         28.0,
                         widgets::Ib::Bare,
-                        "Remover da fila",
+                        t!("music.remove_from_queue"),
                     )
                     .clicked()
                     {
@@ -194,9 +194,9 @@ fn link_row(
 ) {
     ui.horizontal(|ui| {
         let hint = if in_call {
-            "Cole aqui o link do YouTube ou SoundCloud"
+            t!("music.link_hint")
         } else {
-            "Entre numa chamada para tocar música"
+            t!("music.join_to_play")
         };
         let edit = TextEdit::singleline(link)
             .hint_text(hint)
@@ -214,9 +214,9 @@ fn link_row(
             && (ui.input(|i| i.key_pressed(Key::Enter))
                 || resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
         if Button::primary(if extracting {
-            "Buscando…"
+            t!("music.searching")
         } else {
-            "Adicionar"
+            t!("music.add")
         })
         .enabled(in_call && !extracting && !link.trim().is_empty())
         .show(ui)
@@ -233,12 +233,9 @@ fn link_row(
         }
     });
     ui.add_space(2.0);
-    widgets::sub(
-        ui,
-        "Só links de youtube.com, youtu.be ou soundcloud.com. O vídeo não vai; só o áudio.",
-    );
+    widgets::sub(ui, t!("music.link_help"));
     ui.horizontal(|ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -247,9 +244,12 @@ fn link_row(
 fn subtitle_for(item: &Item) -> String {
     let service = &item.service;
     match (item.uploader.as_deref(), !item.by_name.is_empty()) {
-        (Some(up), true) => format!("{service} · {up} · adicionada por {}", item.by_name),
+        (Some(up), true) => format!(
+            "{service} · {up} · {}",
+            tf!("music.added_by", name = item.by_name)
+        ),
         (Some(up), false) => format!("{service} · {up}"),
-        (None, true) => format!("{service} · adicionada por {}", item.by_name),
+        (None, true) => format!("{service} · {}", tf!("music.added_by", name = item.by_name)),
         (None, false) => service.clone(),
     }
 }
