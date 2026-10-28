@@ -776,10 +776,10 @@ const SERVER_ICON_SIDE: u32 = 256;
 /// pixels wide, as a PNG in the temporary folder (a GIF keeps its first
 /// frame). Its path, for the upload.
 fn square_png(path: &std::path::Path, side: u32) -> Result<std::path::PathBuf, String> {
-    let img = image::open(path).map_err(|_| "Não deu para abrir essa imagem.".to_owned())?;
+    let img = image::open(path).map_err(|_| crate::t!("core.image_open_failed").to_owned())?;
     let short = img.width().min(img.height());
     if short == 0 {
-        return Err("Essa imagem está vazia.".into());
+        return Err(crate::t!("core.image_empty").into());
     }
     let square = img.crop_imm(
         (img.width() - short) / 2,
@@ -796,7 +796,7 @@ fn square_png(path: &std::path::Path, side: u32) -> Result<std::path::PathBuf, S
     let file = std::env::temp_dir().join(format!("servidor-{stamp}.png"));
     out.to_rgba8()
         .save(&file)
-        .map_err(|e| format!("Não deu para preparar a imagem: {e}"))?;
+        .map_err(|e| crate::tf!("core.image_prepare_failed", e = e))?;
     Ok(file)
 }
 
@@ -805,15 +805,15 @@ fn square_png(path: &std::path::Path, side: u32) -> Result<std::path::PathBuf, S
 fn save_png(picture: &egui::ColorImage) -> Result<Option<PathBuf>, String> {
     let [w, h] = picture.size;
     let image = image::RgbaImage::from_raw(w as u32, h as u32, picture.as_raw().to_vec())
-        .ok_or("a imagem veio vazia")?;
-    let name = format!(
-        "Anotação {}.png",
-        chrono::Local::now().format("%Y-%m-%d %H.%M.%S")
+        .ok_or(crate::t!("core.image_came_empty"))?;
+    let name = crate::tf!(
+        "core.annotation_filename",
+        n = chrono::Local::now().format("%Y-%m-%d %H.%M.%S")
     );
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Salvar imagem da anotação")
+        .set_title(crate::t!("core.save_annotation_title"))
         .set_file_name(&name)
-        .add_filter("Imagem PNG", &["png"])
+        .add_filter(crate::t!("core.png_image"), &["png"])
         .save_file()
     else {
         return Ok(None);
@@ -1758,9 +1758,7 @@ impl Core {
                         .get("name")
                         .and_then(Value::as_str)
                         .unwrap_or("o servidor");
-                    self.toast(format!(
-                        "Pedido enviado para {name}. Você entra assim que alguém de lá aceitar."
-                    ));
+                    self.toast(crate::tf!("core.request_sent", name = name));
                 } else if let Some(id) = int(&value, "id") {
                     self.arrive(id);
                 }
@@ -2007,7 +2005,7 @@ impl Core {
                     let error = d
                         .get("message")
                         .and_then(Value::as_str)
-                        .unwrap_or("Não deu para enviar a mensagem")
+                        .unwrap_or(crate::t!("core.send_failed"))
                         .to_owned();
                     self.unsent(out.send, out.cid, out.content, Vec::new(), error);
                 }
@@ -2044,7 +2042,7 @@ impl Core {
                     .iter()
                     .filter(|r| !list.iter().any(|n| n.server.id == r.server.id))
                     .filter(|r| self.server(r.server.id).is_some())
-                    .map(|r| format!("Seu pedido foi aceito: você entrou em {}.", r.server.name))
+                    .map(|r| crate::tf!("core.request_accepted", server = r.server.name))
                     .collect();
                 self.join_requests = list;
                 for text in accepted {
@@ -3066,7 +3064,7 @@ impl Core {
                                 path.file_name().unwrap_or_default().to_string_lossy()
                             ),
                             Ok(None) => return,
-                            Err(e) => format!("Não deu para salvar a imagem: {e}"),
+                            Err(e) => crate::tf!("core.save_image_failed", e = e),
                         };
                         let _ = tx.send(Msg::Toast(text));
                     });
@@ -3378,10 +3376,7 @@ impl Core {
                 continue;
             }
             if self.files.len() >= net::MAX_FILES {
-                self.toast(format!(
-                    "Uma mensagem leva até {} arquivos.",
-                    net::MAX_FILES
-                ));
+                self.toast(crate::tf!("core.max_files", n = net::MAX_FILES));
                 break;
             }
             let name = path
@@ -3683,10 +3678,7 @@ impl Core {
             Req::delete(path)
         } else {
             if self.stickers.len() >= giphy::MAX_IDS {
-                self.toast(format!(
-                    "Você já tem {} figurinhas favoritas. Tire alguma antes de guardar outra.",
-                    giphy::MAX_IDS
-                ));
+                self.toast(crate::tf!("core.max_favorites", n = giphy::MAX_IDS));
                 return;
             }
             self.stickers.insert(0, id.to_owned());
@@ -4045,13 +4037,11 @@ impl Core {
                         asked: how == Check::Button,
                     })
                 }
-                Ok(crate::update::Outcome::Busy) => {
-                    say("Já estou baixando a atualização. Um instante.")
-                }
-                Ok(crate::update::Outcome::None) => say("Você já está na versão mais recente."),
+                Ok(crate::update::Outcome::Busy) => say(crate::t!("core.update_downloading")),
+                Ok(crate::update::Outcome::None) => say(crate::t!("core.update_latest")),
                 Err(e) => {
                     crate::logln!("atualização: {e}");
-                    say("Não foi possível procurar atualizações.")
+                    say(crate::t!("core.update_check_failed"))
                 }
             }
         });

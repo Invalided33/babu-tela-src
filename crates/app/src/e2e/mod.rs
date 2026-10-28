@@ -235,7 +235,7 @@ const EXPORT_MAX: usize = 128 * 1024;
 
 /// Why something cannot be sent encrypted.
 pub fn no_keys_text() -> String {
-    "Este PC ainda não tem as chaves da sua conta.".into()
+    crate::t!("e2e.needs_keys").into()
 }
 
 impl E2e {
@@ -836,7 +836,7 @@ impl E2e {
             );
         }
         if out.len() > EXPORT_MAX {
-            return Err("São chaves demais para enviar de uma vez.".into());
+            return Err(crate::t!("e2e.too_many_keys").into());
         }
         Ok(out)
     }
@@ -1093,11 +1093,11 @@ impl E2e {
             return Opened::NoKeys;
         }
         let Some((sid, mid)) = msg::envelope_ids(&env) else {
-            m.seal = Seal::Refused("envelope inválido");
+            m.seal = Seal::Refused(crate::t!("e2e.refused_envelope"));
             return Opened::Refused(Refused::Malformed);
         };
         if *inner.seen.entry(mid).or_insert(m.id) != m.id {
-            m.seal = Seal::Refused("repetida pelo servidor (o envelope já veio em outra mensagem)");
+            m.seal = Seal::Refused(crate::t!("e2e.refused_replay"));
             m.content.clear();
             m.attachments.clear();
             return Opened::Refused(Refused::Replayed);
@@ -1156,7 +1156,7 @@ impl E2e {
         if let Some(ed) = &body.ed
             && ed.id != m.id
         {
-            m.seal = Seal::Refused("edição de outra mensagem");
+            m.seal = Seal::Refused(crate::t!("e2e.refused_edit"));
             m.content.clear();
             m.attachments.clear();
             return Opened::Refused(Refused::WrongSession);
@@ -1372,7 +1372,7 @@ impl E2e {
             }
         }
         if !ids.contains(&me) {
-            return Err("O servidor não me conta como leitor desta conversa.".into());
+            return Err(crate::t!("e2e.not_reader").into());
         }
         // Every key must be its account's newest in the public record: one
         // that is not gets nothing (and the person hears of it).

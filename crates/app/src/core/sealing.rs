@@ -343,7 +343,7 @@ impl Core {
         self.call(
             Req::put(format!("/channels/{cid}/ttl")).with(json!({ "ttl": ttl })),
             Then::Toast(if ttl > 0 {
-                "As mensagens novas desta conversa vão desaparecer.".into()
+                crate::t!("core.ttl_warn").into()
             } else {
                 "As mensagens novas desta conversa ficam.".into()
             }),
@@ -535,9 +535,9 @@ impl Core {
             match api.save_to(&a.url, &path).await {
                 Ok(()) => match open::that_detached(&path) {
                     Ok(()) => Msg::Toast(String::new()),
-                    Err(e) => Msg::Toast(format!("Não deu para abrir {}: {e}", a.name)),
+                    Err(e) => Msg::Toast(crate::tf!("core.open_failed", name = a.name, e = e)),
                 },
-                Err(e) => Msg::Toast(format!("Não deu para baixar {}: {e}", a.name)),
+                Err(e) => Msg::Toast(crate::tf!("core.download_failed", name = a.name, e = e)),
             }
         });
     }

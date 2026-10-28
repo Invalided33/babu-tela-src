@@ -513,11 +513,11 @@ impl Direct {
         if me == 0 {
             return Err("Entre na sua conta para enviar.".into());
         }
-        let unreadable = |e: std::io::Error| format!("Não consegui ler {name}: {e}");
+        let unreadable = |e: std::io::Error| crate::tf!("net.cant_read", name = name, e = e);
         let meta = std::fs::metadata(path).map_err(unreadable)?;
         let (size, modified) = (meta.len(), meta.modified().ok());
-        let piece = hash::piece_for(size)
-            .ok_or_else(|| format!("{name} é grande demais para enviar direto."))?;
+        let piece =
+            hash::piece_for(size).ok_or_else(|| crate::tf!("direct.too_big", name = name))?;
         let (p, prog) = (path.to_path_buf(), progress.clone());
         let hashes = tokio::task::spawn_blocking(move || {
             hash::hash_file(&p, size, piece, &prog.sent, &prog.cancel)
@@ -542,7 +542,7 @@ impl Direct {
         let id = new_id(&root, path);
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         write_atomic(&shared_hashes(&self.dir, &id), &hash::to_bytes(&hashes))
-            .map_err(|e| format!("Não consegui guardar os dados de {name}: {e}"))?;
+            .map_err(|e| crate::tf!("direct.cant_store", name = name, e = e))?;
         let mut st = self.lock();
         if st.me != me {
             return Err("A conta mudou.".into());
@@ -637,7 +637,7 @@ impl Direct {
         let mut st = self.lock();
         let me = st.me;
         if me == 0 || from == me {
-            return Err("Este arquivo é seu.".into());
+            return Err(crate::t!("direct.own_file").into());
         }
         let going = |d: &Download| matches!(d.state, State::Active | State::Paused);
         if st
@@ -646,7 +646,7 @@ impl Direct {
             .iter()
             .any(|d| d.owner == me && d.id == info.id && going(d))
         {
-            return Err("Este arquivo já está sendo baixado.".into());
+            return Err(crate::t!("direct.already_downloading").into());
         }
         if st
             .list
@@ -654,7 +654,7 @@ impl Direct {
             .iter()
             .any(|d| d.owner == me && d.path == path && going(d))
         {
-            return Err("Outro download já vai para esse lugar.".into());
+            return Err(crate::t!("direct.place_taken").into());
         }
         // One of this file that is over (done, or failed) gives its place;
         // what a failed one had written goes on, if it was going to the same
