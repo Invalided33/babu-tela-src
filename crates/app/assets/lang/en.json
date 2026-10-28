@@ -93,5 +93,135 @@
   "tor.restart_off": "Babu Tela will reopen without Tor. The server will see your IP.",
   "tor.ready": "Through Tor: connected.",
   "tor.joining": "Through Tor: joining the network ({pct}%).",
-  "tor.blocked": "Through Tor: the network isn't responding ({why})."
+  "tor.blocked": "Through Tor: the network isn't responding ({why}).",
+
+  "rail.dms": "Direct messages",
+  "rail.add_server": "Create or join a server",
+
+  "nav.friends": "Friends",
+  "nav.conversations": "Conversations",
+  "nav.no_conversations": "No conversations yet.",
+  "nav.no_channels": "No visible channels",
+
+  "channel.edit": "Edit channel",
+
+  "call.mic": "Microphone",
+  "call.audio": "Audio",
+  "call.camera": "Camera",
+  "call.stop_presenting": "Stop presenting",
+  "call.share_screen": "Share screen",
+  "call.hide_draw": "Hide the drawing bar",
+  "call.draw": "Draw over what I share",
+  "call.music": "Music",
+  "call.hang": "Disconnect",
+  "call.connected": "Voice connected",
+
+  "member.online": "Online — {n}",
+  "member.offline": "Offline — {n}",
+
+  "banner.reconnecting": "Connection lost. Reconnecting…",
+  "banner.update_ready": "Update {version} ready: it installs when Babu Tela reopens.",
+  "banner.restart_now": "Restart now",
+
+  "empty.no_channels_title": "Nothing here",
+  "empty.no_channels_text": "This server has no channels you can see.",
+
+  "month.1": "January",
+  "month.2": "February",
+  "month.3": "March",
+  "month.4": "April",
+  "month.5": "May",
+  "month.6": "June",
+  "month.7": "July",
+  "month.8": "August",
+  "month.9": "September",
+  "month.10": "October",
+  "month.11": "November",
+  "month.12": "December",
+
+  "chat.day": "{month} {day}, {year}",
+  "chat.today_at": "Today at {time}",
+  "chat.ttl_off": "Disappearing messages off.",
+  "chat.ttl_1d": "Disappearing messages: each one vanishes 1 day after it's sent.",
+  "chat.ttl_7d": "Disappearing messages: each one vanishes 7 days after it's sent.",
+  "chat.ttl_change": " Click to change.",
+  "chat.members_list": "Member list",
+
+  "chat.seal_opening": "🔒 Opening the encrypted message…",
+  "chat.seal_missing": "🔒 Encrypted message with no key on this PC (sent before you could read this conversation)",
+  "chat.seal_refused": "⚠ Message refused: {why}.",
+  "chat.seal_plain": "Old, unencrypted: the server could read it, and no one vouches for who wrote it.",
+  "chat.seal_gone": "⌛ Disappearing message: its time is up.",
+
+  "chat.rec_fork_me": "The server showed this PC a public key record different from the one it showed your other PC: someone may be in the middle of your conversations.",
+  "chat.rec_fork": "The server showed you a public key record different from the one it showed {name}: someone may be in the middle of the conversations.",
+  "chat.rec_hidden": "{name}'s public key record has entries the server hides from this PC.",
+  "chat.rec_foreign": "A key this PC never had was published for your account. If you didn't create a new identity on another PC, someone is trying to impersonate you.",
+  "chat.rec_rewritten": "The server changed entries of the public key record this PC already had: someone may be in the middle of your conversations.",
+  "chat.rec_owner": "The server says {server} has a different owner. This PC keeps following the previous owner: only those it and the members signed receive the encrypted messages from there.",
+  "chat.rec_unlisted": "The server handed {name} a key that isn't in the public record: nothing goes to them.",
+  "chat.a_server": "a server",
+  "chat.security_code": "Security code",
+  "chat.got_it": "Got it",
+
+  "chat.e2e_needs_keys": "This PC doesn't have your account's keys yet: it can't read or send messages.",
+  "chat.e2e_see_code": "See the code to approve",
+  "chat.e2e_changed": "{name}'s security key changed. Until you check it, nothing is sent.",
+  "chat.e2e_check": "Check",
+
+  "chat.blocked_you": "You blocked this person. Unblock them from their profile to chat.",
+  "chat.no_send_perm": "You don't have permission to send messages in this channel.",
+
+  "chat.typing_one": "{name} is typing…",
+  "chat.typing_some": "{names} are typing…",
+  "chat.typing_many": "Several people are typing…",
+
+  "chat.unknown": "Unknown",
+  "chat.dm_placeholder": "Message {name}",
+  "chat.channel_placeholder": "Message #{channel}",
+  "chat.replying_to": "Replying to",
+  "chat.cancel_reply": "Cancel reply",
+  "chat.attach_file": "Attach file",
+  "chat.giphy_stickers": "GIPHY stickers",
+  "chat.emoji": "Emoji",
+
+  "chat.send_direct": "Send directly",
+  "chat.send_direct_on": "doesn't go to the server: whoever downloads gets it from your PC, while you're online",
+  "chat.send_direct_off": "for huge files, without going through the server",
+
+  "chat.sending_one": "Sending 1 file",
+  "chat.sending_many": "Sending {n} files",
+  "chat.preparing_one": "Preparing 1 file to send directly",
+  "chat.preparing_many": "Preparing {n} files to send directly",
+  "chat.upload_progress": "{sent} of {total} · {pct}%",
+  "chat.cancel_send": "Cancel upload",
+
+  "chat.remove_file": "Remove {name}",
+
+  "chat.load_older": "Load earlier messages",
+  "chat.dm_start": "This is the start of your conversation.",
+  "chat.channel_start": "This is the start of the channel.",
+  "chat.blocked_message": "Message from someone you blocked · show",
+  "chat.a_sticker": "sticker",
+  "chat.an_attachment": "attachment",
+  "chat.show_less": "Show less",
+  "chat.show_full": "… show the whole message ({count} characters)",
+
+  "chat.edit_hint": "Enter to save · Esc to cancel",
+
+  "chat.react": "React",
+  "chat.reply": "Reply",
+  "chat.edit": "Edit",
+  "chat.report": "Report",
+  "chat.delete": "Delete",
+  "chat.delete_title": "Delete message",
+  "chat.delete_body": "This message will be deleted for everyone.",
+
+  "chat.giphy_silent": "GIPHY didn't respond",
+  "chat.sticker_unavailable": "Sticker unavailable",
+  "chat.unfavorite": "Remove from favorites",
+  "chat.favorite_sticker": "Favorite sticker",
+
+  "chat.open": "Open",
+  "chat.open_in_browser": "Open in browser"
 }

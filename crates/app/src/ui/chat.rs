@@ -16,48 +16,44 @@ use crate::images::{Fit, Images};
 use crate::markdown::{self, Click};
 use crate::model::*;
 use crate::theme::{self, *};
-
-const MONTHS: [&str; 12] = [
-    "janeiro",
-    "fevereiro",
-    "março",
-    "abril",
-    "maio",
-    "junho",
-    "julho",
-    "agosto",
-    "setembro",
-    "outubro",
-    "novembro",
-    "dezembro",
-];
+use crate::{t, tf};
 
 fn local(ms: i64) -> Option<chrono::DateTime<Local>> {
     Local.timestamp_millis_opt(ms).single()
 }
 
-/// "Hoje às 14:05" or "16/10/2026 14:05".
+/// The month's name in the current language (`month.1`…`month.12`).
+fn month_name(month: u32) -> &'static str {
+    crate::lang::lookup(&format!("month.{month}")).unwrap_or("")
+}
+
+/// "Hoje às 14:05"/"Today at 14:05", or the date and time in the order the
+/// language writes them ("16/10/2026 14:05").
 pub fn fmt_time(ms: i64) -> String {
     let Some(d) = local(ms) else {
         return String::new();
     };
     if d.date_naive() == Local::now().date_naive() {
-        format!("Hoje às {}", d.format("%H:%M"))
+        tf!("chat.today_at", time = d.format("%H:%M"))
     } else {
-        d.format("%d/%m/%Y %H:%M").to_string()
+        let fmt = match crate::lang::current() {
+            crate::lang::Lang::En => "%m/%d/%Y %H:%M",
+            crate::lang::Lang::Pt => "%d/%m/%Y %H:%M",
+        };
+        d.format(fmt).to_string()
     }
 }
 
-/// "17 de outubro de 2026", for the line between days.
+/// "17 de outubro de 2026"/"October 17, 2026", for the line between days.
 fn fmt_day(ms: i64) -> String {
     let Some(d) = local(ms) else {
         return String::new();
     };
-    format!(
-        "{} de {} de {}",
-        d.day(),
-        MONTHS[d.month0() as usize],
-        d.year()
+    tf!(
+        "chat.day",
+        day = d.day(),
+        month = month_name(d.month()),
+        year = d.year()
     )
 }
 
@@ -70,9 +66,9 @@ fn hm(ms: i64) -> String {
 /// What the clock in a conversation's header says of its messages' time.
 pub fn ttl_text(ttl: i64) -> &'static str {
     match ttl {
-        0 => "Mensagens temporárias desligadas.",
-        86_400 => "Mensagens temporárias: cada uma some 1 dia depois de enviada.",
-        _ => "Mensagens temporárias: cada uma some 7 dias depois de enviada.",
+        0 => t!("chat.ttl_off"),
+        86_400 => t!("chat.ttl_1d"),
+        _ => t!("chat.ttl_7d"),
     }
 }
 
@@ -87,22 +83,11 @@ fn seal_line(ui: &mut Ui, m: &Message) {
     }
     let (text, color) = match &m.seal {
         Seal::Open => return,
-        Seal::Locked => ("🔒 Abrindo a mensagem cifrada…".to_owned(), MUTED),
-        Seal::Missing => (
-            "🔒 Mensagem cifrada sem chave neste PC (enviada antes de você poder ler esta conversa)"
-                .to_owned(),
-            MUTED,
-        ),
-        Seal::Refused(why) => (format!("⚠ Mensagem recusada: {why}."), DANGER),
-        Seal::Plain => (
-            "Antiga, sem criptografia: o servidor pôde ler, e ninguém garante quem escreveu."
-                .to_owned(),
-            FAINT,
-        ),
-        Seal::Gone => (
-            "⌛ Mensagem temporária: o tempo dela acabou.".to_owned(),
-            MUTED,
-        ),
+        Seal::Locked => (t!("chat.seal_opening").to_owned(), MUTED),
+        Seal::Missing => (t!("chat.seal_missing").to_owned(), MUTED),
+        Seal::Refused(why) => (tf!("chat.seal_refused", why = why), DANGER),
+        Seal::Plain => (t!("chat.seal_plain").to_owned(), FAINT),
+        Seal::Gone => (t!("chat.seal_gone").to_owned(), MUTED),
     };
     ui.label(egui::RichText::new(text).size(11.0).color(color));
 }
@@ -189,7 +174,8 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if dm.is_none() {
                 let style = if show_members { Ib::Normal } else { Ib::Bare };
-                if widgets::icon_button(ui, Icon::Users, 34.0, style, "Lista de membros").clicked()
+                if widgets::icon_button(ui, Icon::Users, 34.0, style, t!("chat.members_list"))
+                    .clicked()
                 {
                     acts.later(|c| c.show_members = !c.show_members);
                 }
@@ -198,7 +184,7 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                 let style = if ttl > 0 { Ib::On } else { Ib::Bare };
                 let mut tip = ttl_text(ttl).to_owned();
                 if may_ttl {
-                    tip.push_str(" Clique para mudar.");
+                    tip.push_str(t!("chat.ttl_change"));
                 }
                 if widgets::icon_button(ui, Icon::Clock, 34.0, style, &tip).clicked() && may_ttl {
                     acts.later(move |c| c.open_modal(Modal::Ttl { cid }));
@@ -214,8 +200,8 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         None => (!blocked, true),
     };
     let place = match &dm {
-        Some(u) => format!("Conversar com {}", u.name()),
-        None => format!("Conversar em #{name}"),
+        Some(u) => tf!("chat.dm_placeholder", name = u.name()),
+        None => tf!("chat.channel_placeholder", channel = name),
     };
     Panel::bottom("composer")
         .resizable(false)
@@ -286,55 +272,21 @@ fn record_alert(ui: &mut Ui, core: &Core, alert: &crate::e2e::Alert, acts: &mut 
     use crate::e2e::Alert;
     let name = |uid: i64| core.user(uid).name().to_owned();
     let (text, who) = match alert {
-        Alert::Fork(uid) if *uid == core.me_id() => (
-            "O servidor mostrou a este PC um registro público de chaves diferente do que mostrou \
-             ao seu outro PC: alguém pode estar no meio das suas conversas."
-                .to_owned(),
-            None,
-        ),
-        Alert::Fork(uid) => (
-            format!(
-                "O servidor mostrou a você um registro público de chaves diferente do que mostrou \
-                 a {}: alguém pode estar no meio das conversas.",
-                name(*uid)
-            ),
-            Some(*uid),
-        ),
-        Alert::Hidden(uid) => (
-            format!(
-                "O registro público de chaves de {} tem entradas que o servidor esconde deste PC.",
-                name(*uid)
-            ),
-            Some(*uid),
-        ),
-        Alert::Foreign => (
-            "Uma chave que este PC nunca teve foi publicada para a sua conta. Se você não criou \
-             uma identidade nova em outro PC, alguém tenta se passar por você."
-                .to_owned(),
-            None,
-        ),
-        Alert::Rewritten => (
-            "O servidor mudou entradas do registro público de chaves que este PC já tinha: \
-             alguém pode estar no meio das suas conversas."
-                .to_owned(),
-            None,
-        ),
+        Alert::Fork(uid) if *uid == core.me_id() => (t!("chat.rec_fork_me").to_owned(), None),
+        Alert::Fork(uid) => (tf!("chat.rec_fork", name = name(*uid)), Some(*uid)),
+        Alert::Hidden(uid) => (tf!("chat.rec_hidden", name = name(*uid)), Some(*uid)),
+        Alert::Foreign => (t!("chat.rec_foreign").to_owned(), None),
+        Alert::Rewritten => (t!("chat.rec_rewritten").to_owned(), None),
         Alert::Owner(sid) => (
-            format!(
-                "O servidor diz que {} tem outro dono. Este PC continua seguindo o dono de antes: \
-                 só quem ele e os membros assinaram recebe as mensagens cifradas de lá.",
-                core.server(*sid).map_or("um servidor", |s| s.name.as_str())
+            tf!(
+                "chat.rec_owner",
+                server = core
+                    .server(*sid)
+                    .map_or(t!("chat.a_server"), |s| s.name.as_str())
             ),
             None,
         ),
-        Alert::Unlisted(uid) => (
-            format!(
-                "O servidor entregou para {} uma chave que não está no registro público: nada \
-                 vai para ela.",
-                name(*uid)
-            ),
-            Some(*uid),
-        ),
+        Alert::Unlisted(uid) => (tf!("chat.rec_unlisted", name = name(*uid)), Some(*uid)),
     };
     Frame::new()
         .fill(BG3)
@@ -346,11 +298,11 @@ fn record_alert(ui: &mut Ui, core: &Core, alert: &crate::e2e::Alert, acts: &mut 
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(format!("⚠ {text}")).color(DANGER));
                 if let Some(uid) = who
-                    && widgets::link(ui, "Código de segurança").clicked()
+                    && widgets::link(ui, t!("chat.security_code")).clicked()
                 {
                     acts.later(move |c| super::security::open(c, uid));
                 }
-                if widgets::link(ui, "Entendi").clicked() {
+                if widgets::link(ui, t!("chat.got_it")).clicked() {
                     acts.later(|c| c.e2e.dismiss_alert());
                 }
             });
@@ -369,23 +321,13 @@ fn e2e_banner(ui: &mut Ui, needs_keys: bool, changed: Option<(i64, String)>, act
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 if needs_keys {
-                    ui.label(
-                        egui::RichText::new(
-                            "Este PC ainda não tem as chaves da sua conta: não lê nem envia mensagens.",
-                        )
-                        .color(WARN),
-                    );
-                    if widgets::link(ui, "Ver o código para aprovar").clicked() {
+                    ui.label(egui::RichText::new(t!("chat.e2e_needs_keys")).color(WARN));
+                    if widgets::link(ui, t!("chat.e2e_see_code")).clicked() {
                         acts.later(|c| c.open_modal(Modal::NewDevice));
                     }
                 } else if let Some((uid, name)) = changed {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "A chave de segurança de {name} mudou. Até você conferir, nada é enviado."
-                        ))
-                        .color(WARN),
-                    );
-                    if widgets::link(ui, "Conferir").clicked() {
+                    ui.label(egui::RichText::new(tf!("chat.e2e_changed", name = name)).color(WARN));
+                    if widgets::link(ui, t!("chat.e2e_check")).clicked() {
                         acts.later(move |c| super::security::open(c, uid));
                     }
                 }
@@ -403,9 +345,9 @@ fn locked(ui: &mut Ui, blocked: bool) {
             ui.vertical_centered(|ui| {
                 ui.label(
                     egui::RichText::new(if blocked {
-                        "Você bloqueou essa pessoa. Desbloqueie pelo perfil dela para conversar."
+                        t!("chat.blocked_you")
                     } else {
-                        "Você não tem permissão para enviar mensagens neste canal."
+                        t!("chat.no_send_perm")
                     })
                     .color(MUTED),
                 );
@@ -427,9 +369,9 @@ fn typing(ui: &mut Ui, core: &Core, cid: i64) {
         .unwrap_or_default();
     let text = match who.len() {
         0 => return,
-        1 => format!("{} está digitando…", who[0]),
-        2 | 3 => format!("{} estão digitando…", who.join(", ")),
-        _ => "Várias pessoas estão digitando…".to_owned(),
+        1 => tf!("chat.typing_one", name = who[0]),
+        2 | 3 => tf!("chat.typing_some", names = who.join(", ")),
+        _ => t!("chat.typing_many").to_owned(),
     };
     ui.label(egui::RichText::new(text).size(12.0).color(MUTED));
 }
@@ -452,7 +394,7 @@ fn composer(
     let reply = core.reply.as_ref().map(|r| {
         r.author
             .as_ref()
-            .map_or("Desconhecido".to_owned(), |a| a.name().to_owned())
+            .map_or(t!("chat.unknown").to_owned(), |a| a.name().to_owned())
     });
     let files: Vec<(String, usize)> = core
         .files
@@ -520,7 +462,11 @@ fn composer(
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.add(Icon::Reply.image(icons::SMALL, MUTED));
-                            ui.label(egui::RichText::new("Respondendo a").size(12.0).color(MUTED));
+                            ui.label(
+                                egui::RichText::new(t!("chat.replying_to"))
+                                    .size(12.0)
+                                    .color(MUTED),
+                            );
                             ui.label(
                                 egui::RichText::new(name)
                                     .font(theme::bold(12.0))
@@ -533,7 +479,7 @@ fn composer(
                                     20.0,
                                     14.0,
                                     Ib::Bare,
-                                    "Cancelar resposta",
+                                    t!("chat.cancel_reply"),
                                 )
                                 .clicked()
                                 {
@@ -998,14 +944,15 @@ fn input_line(
                 let mut at = ui.new_child(egui::UiBuilder::new().max_rect(rect));
                 widgets::icon_button(&mut at, icon, BUTTON, Ib::Bare, tip)
             };
-            let attach = may_attach.then(|| button(ui, full.left(), Icon::Clip, "Anexar arquivo"));
+            let attach =
+                may_attach.then(|| button(ui, full.left(), Icon::Clip, t!("chat.attach_file")));
             let mut x = full.left() + left + width + GAP;
             let sticker = stickers.then(|| {
-                let b = button(ui, x, Icon::Sticker, "Figurinhas do GIPHY");
+                let b = button(ui, x, Icon::Sticker, t!("chat.giphy_stickers"));
                 x += BUTTON;
                 b
             });
-            let emoji = button(ui, x, Icon::Smile, "Emoji");
+            let emoji = button(ui, x, Icon::Smile, t!("chat.emoji"));
             ui.advance_cursor_after_rect(Rect::from_min_max(full.min, pos2(full.right(), bottom)));
             Line {
                 attach,
@@ -1075,7 +1022,7 @@ struct Upload {
 /// when on. They then go straight from this PC to whoever downloads them,
 /// never to the server (direct/).
 fn direct_toggle(ui: &mut Ui, on: bool, acts: &mut Acts) {
-    const LABEL: &str = "Enviar direto";
+    let label = t!("chat.send_direct");
     Frame::new()
         .inner_margin(Margin {
             left: 12,
@@ -1089,7 +1036,7 @@ fn direct_toggle(ui: &mut Ui, on: bool, acts: &mut Acts) {
                 let ink = if on { ACCENT } else { MUTED };
                 let galley = ui
                     .painter()
-                    .layout_no_wrap(LABEL.to_owned(), theme::bold(12.0), ink);
+                    .layout_no_wrap(label.to_owned(), theme::bold(12.0), ink);
                 let size = vec2(8.0 + icons::SMALL + 6.0 + galley.size().x + 10.0, 24.0);
                 let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
                 crate::smoke::target(|| "enviar-direto".to_owned(), rect);
@@ -1128,12 +1075,12 @@ fn direct_toggle(ui: &mut Ui, on: bool, acts: &mut Acts) {
                     ui.painter().galley(text, galley, ink);
                 }
                 resp.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, LABEL)
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, label)
                 });
                 let hint = if on {
-                    "não vai para o servidor: quem baixar recebe do seu PC, com você online"
+                    t!("chat.send_direct_on")
                 } else {
-                    "para arquivos enormes, sem passar pelo servidor"
+                    t!("chat.send_direct_off")
                 };
                 widgets::ellipsis(ui, hint, theme::tiny(), MUTED);
                 if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
@@ -1159,18 +1106,18 @@ fn upload_row(ui: &mut Ui, up: &Upload, acts: &mut Acts) {
                 let icon = if up.direct { Icon::Direct } else { Icon::Clip };
                 ui.add(icon.image(icons::SMALL, MUTED));
                 let what = match (up.direct, up.files) {
-                    (false, 1) => "Enviando 1 arquivo".to_owned(),
-                    (false, n) => format!("Enviando {n} arquivos"),
-                    (true, 1) => "Preparando 1 arquivo para enviar direto".to_owned(),
-                    (true, n) => format!("Preparando {n} arquivos para enviar direto"),
+                    (false, 1) => t!("chat.sending_one").to_owned(),
+                    (false, n) => tf!("chat.sending_many", n = n),
+                    (true, 1) => t!("chat.preparing_one").to_owned(),
+                    (true, n) => tf!("chat.preparing_many", n = n),
                 };
                 ui.label(egui::RichText::new(what).size(12.0).color(TEXT));
                 ui.label(
-                    egui::RichText::new(format!(
-                        "{} de {} · {}%",
-                        widgets::fmt_size(up.sent as i64),
-                        widgets::fmt_size(up.total as i64),
-                        (up.fraction * 100.0).floor() as u32
+                    egui::RichText::new(tf!(
+                        "chat.upload_progress",
+                        sent = widgets::fmt_size(up.sent as i64),
+                        total = widgets::fmt_size(up.total as i64),
+                        pct = (up.fraction * 100.0).floor() as u32
                     ))
                     .size(12.0)
                     .color(MUTED),
@@ -1182,7 +1129,7 @@ fn upload_row(ui: &mut Ui, up: &Upload, acts: &mut Acts) {
                         18.0,
                         12.0,
                         Ib::Bare,
-                        "Cancelar envio",
+                        t!("chat.cancel_send"),
                     );
                     if cancel.clicked() {
                         let id = up.id;
@@ -1211,7 +1158,7 @@ fn chip(ui: &mut Ui, name: &str, i: usize, acts: &mut Acts) {
                 ui.allocate_ui(vec2(160.0, 16.0), |ui| {
                     widgets::ellipsis(ui, name, theme::tiny(), TEXT);
                 });
-                let label = format!("Remover {name}");
+                let label = tf!("chat.remove_file", name = name);
                 if widgets::icon_button_sized(ui, Icon::X, 18.0, 12.0, Ib::Bare, &label).clicked() {
                     acts.later(move |c| {
                         if i < c.files.len() {
@@ -1283,7 +1230,7 @@ fn messages(
         ui.add_space(12.0);
         if st.more {
             ui.vertical_centered(|ui| {
-                if widgets::link(ui, "Carregar mensagens anteriores").clicked() {
+                if widgets::link(ui, t!("chat.load_older")).clicked() {
                     acts.later(Core::load_older);
                 }
             });
@@ -1306,9 +1253,9 @@ fn messages(
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(if dm {
-                            "Este é o começo da sua conversa."
+                            t!("chat.dm_start")
                         } else {
-                            "Este é o começo do canal."
+                            t!("chat.channel_start")
                         })
                         .color(MUTED),
                     );
@@ -1387,7 +1334,7 @@ fn message(
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             ui.add_space(56.0);
-            let r = widgets::link(ui, "Mensagem de alguém que você bloqueou · mostrar");
+            let r = widgets::link(ui, t!("chat.blocked_message"));
             if r.clicked() {
                 let id = m.id;
                 acts.later(move |c| {
@@ -1449,12 +1396,12 @@ fn message(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.add(Icon::Reply.image(icons::SMALL, MUTED));
-                    let who = r.author.as_ref().map_or("Desconhecido", |a| a.name());
+                    let who = r.author.as_ref().map_or(t!("chat.unknown"), |a| a.name());
                     ui.label(egui::RichText::new(who).font(theme::bold(12.0)).color(TEXT));
                     let quote = match (r.content.is_empty(), &r.sticker) {
                         (false, _) => r.content.as_str(),
-                        (true, Some(_)) => "figurinha",
-                        (true, None) => "anexo",
+                        (true, Some(_)) => t!("chat.a_sticker"),
+                        (true, None) => t!("chat.an_attachment"),
                     };
                     widgets::ellipsis(ui, quote, theme::tiny(), MUTED);
                 });
@@ -1517,11 +1464,11 @@ fn message(
                         }
                         if long {
                             let label = if open {
-                                "Mostrar menos".to_owned()
+                                t!("chat.show_less").to_owned()
                             } else {
-                                format!(
-                                    "… mostrar a mensagem inteira ({} caracteres)",
-                                    thousands(m.content.chars().count())
+                                tf!(
+                                    "chat.show_full",
+                                    count = thousands(m.content.chars().count())
                                 )
                             };
                             if widgets::link(ui, &label).clicked() {
@@ -1615,7 +1562,7 @@ fn edit_box(ui: &mut Ui, e: &mut Editing, acts: &mut Acts) {
         acts.later(Core::finish_edit);
     }
     ui.label(
-        egui::RichText::new("Enter para salvar · Esc para cancelar")
+        egui::RichText::new(t!("chat.edit_hint"))
             .size(11.0)
             .color(FAINT),
     );
@@ -1631,16 +1578,18 @@ fn tools(
     dm: bool,
     acts: &mut Acts,
 ) {
-    let mut items: Vec<(Icon, &str, u8)> =
-        vec![(Icon::Smile, "Reagir", 0), (Icon::Reply, "Responder", 1)];
+    let mut items: Vec<(Icon, &str, u8)> = vec![
+        (Icon::Smile, t!("chat.react"), 0),
+        (Icon::Reply, t!("chat.reply"), 1),
+    ];
     if editable(m, mine) {
-        items.push((Icon::Edit, "Editar", 2));
+        items.push((Icon::Edit, t!("chat.edit"), 2));
     }
     if !mine && !dm {
-        items.push((Icon::Flag, "Denunciar", 3));
+        items.push((Icon::Flag, t!("chat.report"), 3));
     }
     if can_delete {
-        items.push((Icon::Trash, "Apagar", 4));
+        items.push((Icon::Trash, t!("chat.delete"), 4));
     }
     let bar = tools_rect(rect, items.len());
     // Painted after the message and before the next one, so it covers the
@@ -1695,9 +1644,9 @@ fn tools(
                 }),
                 _ => acts.later(move |c| {
                     c.confirm(
-                        "Apagar mensagem",
-                        "Essa mensagem será apagada para todo mundo.",
-                        "Apagar",
+                        t!("chat.delete_title"),
+                        t!("chat.delete_body"),
+                        t!("chat.delete"),
                         Action::DeleteMessage(mid),
                     )
                 }),
@@ -1748,7 +1697,7 @@ fn sticker(ui: &mut Ui, core: &Core, mid: i64, gid: &str, acts: &mut Acts) {
                 ui.painter().text(
                     rect.center(),
                     Align2::CENTER_CENTER,
-                    "O GIPHY não respondeu",
+                    t!("chat.giphy_silent"),
                     theme::tiny(),
                     FAINT,
                 );
@@ -1788,7 +1737,7 @@ fn sticker(ui: &mut Ui, core: &Core, mid: i64, gid: &str, acts: &mut Acts) {
             ui.painter().text(
                 rect.center(),
                 Align2::CENTER_CENTER,
-                "Figurinha indisponível",
+                t!("chat.sticker_unavailable"),
                 theme::tiny(),
                 FAINT,
             );
@@ -1821,7 +1770,7 @@ fn gone_sticker(ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.add(Icon::Sticker.tinted(FAINT));
-                ui.label(egui::RichText::new("Figurinha indisponível").color(MUTED));
+                ui.label(egui::RichText::new(t!("chat.sticker_unavailable")).color(MUTED));
             });
         });
 }
@@ -1829,9 +1778,9 @@ fn gone_sticker(ui: &mut Ui) {
 /// The round star over a sticker: filled when it is a favourite.
 pub fn star_button(ui: &mut Ui, rect: Rect, id: Id, kept: bool) -> Response {
     let tip = if kept {
-        "Tirar das favoritas"
+        t!("chat.unfavorite")
     } else {
-        "Favoritar figurinha"
+        t!("chat.favorite_sticker")
     };
     let resp = ui
         .interact(rect, id, Sense::click())
@@ -1972,9 +1921,9 @@ fn attachment(
         .interact(Sense::click())
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(if sealed {
-            "Abrir"
+            t!("chat.open")
         } else {
-            "Abrir no navegador"
+            t!("chat.open_in_browser")
         });
     if resp.clicked() {
         open(acts, url);
@@ -2080,11 +2029,19 @@ mod tests {
     }
 
     #[test]
-    fn days_read_in_portuguese() {
+    fn days_read_in_each_language() {
         // 2026-10-17 12:00 UTC, which is the 17th in Brazil too.
         let ms = 1_792_238_400_000;
-        let day = fmt_day(ms);
-        assert!(day.ends_with("de outubro de 2026"), "{day}");
+        crate::lang::set(crate::lang::Lang::Pt);
+        assert!(
+            fmt_day(ms).ends_with("de outubro de 2026"),
+            "{}",
+            fmt_day(ms)
+        );
+        crate::lang::set(crate::lang::Lang::En);
+        let en = fmt_day(ms);
+        assert!(en.starts_with("October ") && en.ends_with(", 2026"), "{en}");
+        crate::lang::set(crate::lang::Lang::Pt);
         assert!(fmt_time(ms).contains(':'));
         assert_eq!(fmt_day(i64::MAX), "");
     }

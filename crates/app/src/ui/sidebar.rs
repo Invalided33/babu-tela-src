@@ -12,6 +12,7 @@ use crate::core::{Core, Modal, Pop, PopKind, View};
 use crate::icons::{self, Icon};
 use crate::model::*;
 use crate::sounds::Cue;
+use crate::t;
 use crate::theme::{self, *};
 
 // ---------------------------------------------------------------- the rail
@@ -68,13 +69,8 @@ pub fn rail(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                 .sum();
             let pending = core.pending_friends() as u32;
             let home = core.view.is_home();
-            let (rect, resp) = rail_button(
-                ui,
-                Id::unique("rail-home"),
-                home,
-                false,
-                "Mensagens diretas",
-            );
+            let (rect, resp) =
+                rail_button(ui, Id::unique("rail-home"), home, false, t!("rail.dms"));
             let lit = home || resp.hovered();
             paint_square(ui, rect, lit, if lit { ACCENT } else { BG3 });
             Icon::Chat
@@ -139,7 +135,7 @@ pub fn rail(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                 Id::unique("rail-add"),
                 false,
                 false,
-                "Criar ou entrar em um servidor",
+                t!("rail.add_server"),
             );
             if resp.hovered() {
                 widgets::paint_gradient(ui, rect, CornerRadius::same(12), 1.0);
@@ -274,7 +270,7 @@ fn side_head(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         ui.painter().text(
             pos2(full.left() + 14.0, full.center().y),
             Align2::LEFT_CENTER,
-            "Mensagens diretas",
+            t!("rail.dms"),
             theme::bold(15.0),
             TEXT,
         );
@@ -339,16 +335,24 @@ fn conversations(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         widgets::badge_at(ui, pos2(right - 10.0, rect.center().y), pending, None);
         right -= 26.0;
     }
-    row_text(ui, rect, rect.left() + 34.0, right, "Amigos", color, false);
+    row_text(
+        ui,
+        rect,
+        rect.left() + 34.0,
+        right,
+        t!("nav.friends"),
+        color,
+        false,
+    );
     if resp.clicked() {
         acts.later(|c| c.go_to(View::HOME));
     }
     ui.add_space(12.0);
-    widgets::caption(ui, "Conversas");
+    widgets::caption(ui, t!("nav.conversations"));
     ui.add_space(4.0);
     if core.dms.is_empty() {
         ui.label(
-            egui::RichText::new("Nenhuma conversa ainda.")
+            egui::RichText::new(t!("nav.no_conversations"))
                 .color(FAINT)
                 .size(12.0),
         );
@@ -399,7 +403,7 @@ fn channels(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         }
     }
     if cats.is_empty() {
-        widgets::caption(ui, "Nenhum canal visível");
+        widgets::caption(ui, t!("nav.no_channels"));
     }
     let manage = s.can(P_MANAGE_CHANNELS);
     let sid = s.id;
@@ -470,7 +474,7 @@ fn channel_row(ui: &mut Ui, core: &Core, s: &Server, c: &Channel, manage: bool, 
         let gear = Rect::from_center_size(pos2(right - 9.0, rect.center().y), Vec2::splat(18.0));
         let g = ui
             .interact(gear, Id::unique(("gear", c.id)), Sense::click())
-            .on_hover_text("Editar canal");
+            .on_hover_text(t!("channel.edit"));
         crate::smoke::target(|| format!("engrenagem:{}", c.label()), gear);
         Icon::Gear
             .image(16.0, if g.hovered() { TEXT } else { MUTED })
@@ -640,12 +644,12 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
             CallButton::Mic => (
                 Icon::mic(mute),
                 if mute { Ib::Off } else { plain },
-                "Microfone",
+                t!("call.mic"),
             ),
             CallButton::Sound => (
                 Icon::head(deaf),
                 if deaf { Ib::Off } else { plain },
-                "Áudio",
+                t!("call.audio"),
             ),
             CallButton::Camera => (
                 Icon::Video,
@@ -654,9 +658,11 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                 } else {
                     plain
                 },
-                "Câmera",
+                t!("call.camera"),
             ),
-            CallButton::Screen if presenting => (Icon::Presentation, Ib::On, "Parar de apresentar"),
+            CallButton::Screen if presenting => {
+                (Icon::Presentation, Ib::On, t!("call.stop_presenting"))
+            }
             CallButton::Screen => (
                 Icon::Screen,
                 if video == Some(Video::Screen) {
@@ -664,15 +670,15 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                 } else {
                     plain
                 },
-                "Compartilhar tela",
+                t!("call.share_screen"),
             ),
             CallButton::Draw => (
                 Icon::Edit,
                 if drawing { Ib::On } else { plain },
                 if drawing {
-                    "Esconder a barra de desenho"
+                    t!("call.hide_draw")
                 } else {
-                    "Desenhar sobre o que compartilho"
+                    t!("call.draw")
                 },
             ),
             CallButton::Music => (
@@ -682,9 +688,9 @@ pub fn voice_buttons(ui: &mut Ui, core: &Core, acts: &mut Acts, side: f32, which
                 } else {
                     plain
                 },
-                "Música",
+                t!("call.music"),
             ),
-            CallButton::Hang => (Icon::Hang, Ib::Hang, "Desconectar"),
+            CallButton::Hang => (Icon::Hang, Ib::Hang, t!("call.hang")),
         };
         if !widgets::icon_button_sized(ui, icon, side, icon_size, style, tip).clicked() {
             continue;
@@ -729,7 +735,7 @@ fn voice_panel(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let resp = ui
         .vertical(|ui| {
             ui.label(
-                egui::RichText::new("Voz conectada")
+                egui::RichText::new(t!("call.connected"))
                     .font(theme::bold(13.0))
                     .color(ACCENT),
             );
@@ -770,7 +776,8 @@ fn user_panel(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            if widgets::icon_button(ui, Icon::Gear, SIDE, Ib::Bare, "Configurações").clicked() {
+            if widgets::icon_button(ui, Icon::Gear, SIDE, Ib::Bare, t!("settings.title")).clicked()
+            {
                 acts.later(Core::open_settings);
             }
             if in_call {

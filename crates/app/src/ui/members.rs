@@ -6,6 +6,7 @@ use super::Acts;
 use super::widgets;
 use crate::core::{Core, Modal};
 use crate::model::*;
+use crate::tf;
 use crate::theme::{self, *};
 
 pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
@@ -21,14 +22,14 @@ pub fn draw(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.add_space(6.0);
-            widgets::caption(ui, &format!("Online — {}", on.len()));
+            widgets::caption(ui, &tf!("member.online", n = on.len()));
             ui.add_space(4.0);
             for m in on {
                 row(ui, core, s, m, false, acts);
             }
             if !off.is_empty() {
                 ui.add_space(12.0);
-                widgets::caption(ui, &format!("Offline — {}", off.len()));
+                widgets::caption(ui, &tf!("member.offline", n = off.len()));
                 ui.add_space(4.0);
                 for m in off {
                     row(ui, core, s, m, true, acts);

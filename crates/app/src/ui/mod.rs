@@ -30,6 +30,7 @@ use egui::{
 use crate::core::{Core, Gate, Phase};
 use crate::icons::{self, Icon};
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 type Act = Box<dyn FnOnce(&mut Core)>;
 
@@ -177,8 +178,8 @@ fn app(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             } else {
                 empty(
                     ui,
-                    "Nada por aqui",
-                    "Este servidor não tem canais que você possa ver.",
+                    t!("empty.no_channels_title"),
+                    t!("empty.no_channels_text"),
                 );
             }
         });
@@ -406,19 +407,16 @@ fn resize_edges(ctx: &egui::Context) {
 /// ready to install.
 fn banner(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let text = if core.reconnecting {
-        Some(("Conexão perdida. Reconectando…".to_owned(), false))
+        Some((t!("banner.reconnecting").to_owned(), false))
     } else {
         // Downloaded while the app ran (update.rs): the next start
         // installs it, as Discord's green arrow says.
-        core.update_ready.as_ref().map(|v| {
-            (
-                format!("Atualização {v} pronta: ela entra quando o Babu Tela abrir de novo."),
-                true,
-            )
-        })
+        core.update_ready
+            .as_ref()
+            .map(|v| (tf!("banner.update_ready", version = v), true))
     };
     let Some((text, update)) = text else { return };
-    const RESTART: &str = "Reiniciar agora";
+    let restart = t!("banner.restart_now");
     Panel::top("banner")
         .resizable(false)
         .show_separator_line(false)
@@ -439,7 +437,7 @@ fn banner(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                     };
                     let mut width = measure(&text);
                     if update {
-                        width += ui.spacing().item_spacing.x + measure(RESTART);
+                        width += ui.spacing().item_spacing.x + measure(restart);
                     }
                     ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
                     ui.label(
@@ -450,7 +448,7 @@ fn banner(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
                     if update {
                         let r = ui.add(
                             egui::Label::new(
-                                egui::RichText::new(RESTART)
+                                egui::RichText::new(restart)
                                     .font(theme::bold(13.0))
                                     .color(WARN_INK)
                                     .underline(),

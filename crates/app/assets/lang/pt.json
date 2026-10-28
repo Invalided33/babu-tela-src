@@ -93,5 +93,135 @@
   "tor.restart_off": "O Babu Tela vai abrir de novo sem o Tor. O servidor vai ver o seu IP.",
   "tor.ready": "Pelo Tor: conectado.",
   "tor.joining": "Pelo Tor: entrando na rede ({pct}%).",
-  "tor.blocked": "Pelo Tor: a rede não responde ({why})."
+  "tor.blocked": "Pelo Tor: a rede não responde ({why}).",
+
+  "rail.dms": "Mensagens diretas",
+  "rail.add_server": "Criar ou entrar em um servidor",
+
+  "nav.friends": "Amigos",
+  "nav.conversations": "Conversas",
+  "nav.no_conversations": "Nenhuma conversa ainda.",
+  "nav.no_channels": "Nenhum canal visível",
+
+  "channel.edit": "Editar canal",
+
+  "call.mic": "Microfone",
+  "call.audio": "Áudio",
+  "call.camera": "Câmera",
+  "call.stop_presenting": "Parar de apresentar",
+  "call.share_screen": "Compartilhar tela",
+  "call.hide_draw": "Esconder a barra de desenho",
+  "call.draw": "Desenhar sobre o que compartilho",
+  "call.music": "Música",
+  "call.hang": "Desconectar",
+  "call.connected": "Voz conectada",
+
+  "member.online": "Online — {n}",
+  "member.offline": "Offline — {n}",
+
+  "banner.reconnecting": "Conexão perdida. Reconectando…",
+  "banner.update_ready": "Atualização {version} pronta: ela entra quando o Babu Tela abrir de novo.",
+  "banner.restart_now": "Reiniciar agora",
+
+  "empty.no_channels_title": "Nada por aqui",
+  "empty.no_channels_text": "Este servidor não tem canais que você possa ver.",
+
+  "month.1": "janeiro",
+  "month.2": "fevereiro",
+  "month.3": "março",
+  "month.4": "abril",
+  "month.5": "maio",
+  "month.6": "junho",
+  "month.7": "julho",
+  "month.8": "agosto",
+  "month.9": "setembro",
+  "month.10": "outubro",
+  "month.11": "novembro",
+  "month.12": "dezembro",
+
+  "chat.day": "{day} de {month} de {year}",
+  "chat.today_at": "Hoje às {time}",
+  "chat.ttl_off": "Mensagens temporárias desligadas.",
+  "chat.ttl_1d": "Mensagens temporárias: cada uma some 1 dia depois de enviada.",
+  "chat.ttl_7d": "Mensagens temporárias: cada uma some 7 dias depois de enviada.",
+  "chat.ttl_change": " Clique para mudar.",
+  "chat.members_list": "Lista de membros",
+
+  "chat.seal_opening": "🔒 Abrindo a mensagem cifrada…",
+  "chat.seal_missing": "🔒 Mensagem cifrada sem chave neste PC (enviada antes de você poder ler esta conversa)",
+  "chat.seal_refused": "⚠ Mensagem recusada: {why}.",
+  "chat.seal_plain": "Antiga, sem criptografia: o servidor pôde ler, e ninguém garante quem escreveu.",
+  "chat.seal_gone": "⌛ Mensagem temporária: o tempo dela acabou.",
+
+  "chat.rec_fork_me": "O servidor mostrou a este PC um registro público de chaves diferente do que mostrou ao seu outro PC: alguém pode estar no meio das suas conversas.",
+  "chat.rec_fork": "O servidor mostrou a você um registro público de chaves diferente do que mostrou a {name}: alguém pode estar no meio das conversas.",
+  "chat.rec_hidden": "O registro público de chaves de {name} tem entradas que o servidor esconde deste PC.",
+  "chat.rec_foreign": "Uma chave que este PC nunca teve foi publicada para a sua conta. Se você não criou uma identidade nova em outro PC, alguém tenta se passar por você.",
+  "chat.rec_rewritten": "O servidor mudou entradas do registro público de chaves que este PC já tinha: alguém pode estar no meio das suas conversas.",
+  "chat.rec_owner": "O servidor diz que {server} tem outro dono. Este PC continua seguindo o dono de antes: só quem ele e os membros assinaram recebe as mensagens cifradas de lá.",
+  "chat.rec_unlisted": "O servidor entregou para {name} uma chave que não está no registro público: nada vai para ela.",
+  "chat.a_server": "um servidor",
+  "chat.security_code": "Código de segurança",
+  "chat.got_it": "Entendi",
+
+  "chat.e2e_needs_keys": "Este PC ainda não tem as chaves da sua conta: não lê nem envia mensagens.",
+  "chat.e2e_see_code": "Ver o código para aprovar",
+  "chat.e2e_changed": "A chave de segurança de {name} mudou. Até você conferir, nada é enviado.",
+  "chat.e2e_check": "Conferir",
+
+  "chat.blocked_you": "Você bloqueou essa pessoa. Desbloqueie pelo perfil dela para conversar.",
+  "chat.no_send_perm": "Você não tem permissão para enviar mensagens neste canal.",
+
+  "chat.typing_one": "{name} está digitando…",
+  "chat.typing_some": "{names} estão digitando…",
+  "chat.typing_many": "Várias pessoas estão digitando…",
+
+  "chat.unknown": "Desconhecido",
+  "chat.dm_placeholder": "Conversar com {name}",
+  "chat.channel_placeholder": "Conversar em #{channel}",
+  "chat.replying_to": "Respondendo a",
+  "chat.cancel_reply": "Cancelar resposta",
+  "chat.attach_file": "Anexar arquivo",
+  "chat.giphy_stickers": "Figurinhas do GIPHY",
+  "chat.emoji": "Emoji",
+
+  "chat.send_direct": "Enviar direto",
+  "chat.send_direct_on": "não vai para o servidor: quem baixar recebe do seu PC, com você online",
+  "chat.send_direct_off": "para arquivos enormes, sem passar pelo servidor",
+
+  "chat.sending_one": "Enviando 1 arquivo",
+  "chat.sending_many": "Enviando {n} arquivos",
+  "chat.preparing_one": "Preparando 1 arquivo para enviar direto",
+  "chat.preparing_many": "Preparando {n} arquivos para enviar direto",
+  "chat.upload_progress": "{sent} de {total} · {pct}%",
+  "chat.cancel_send": "Cancelar envio",
+
+  "chat.remove_file": "Remover {name}",
+
+  "chat.load_older": "Carregar mensagens anteriores",
+  "chat.dm_start": "Este é o começo da sua conversa.",
+  "chat.channel_start": "Este é o começo do canal.",
+  "chat.blocked_message": "Mensagem de alguém que você bloqueou · mostrar",
+  "chat.a_sticker": "figurinha",
+  "chat.an_attachment": "anexo",
+  "chat.show_less": "Mostrar menos",
+  "chat.show_full": "… mostrar a mensagem inteira ({count} caracteres)",
+
+  "chat.edit_hint": "Enter para salvar · Esc para cancelar",
+
+  "chat.react": "Reagir",
+  "chat.reply": "Responder",
+  "chat.edit": "Editar",
+  "chat.report": "Denunciar",
+  "chat.delete": "Apagar",
+  "chat.delete_title": "Apagar mensagem",
+  "chat.delete_body": "Essa mensagem será apagada para todo mundo.",
+
+  "chat.giphy_silent": "O GIPHY não respondeu",
+  "chat.sticker_unavailable": "Figurinha indisponível",
+  "chat.unfavorite": "Tirar das favoritas",
+  "chat.favorite_sticker": "Favoritar figurinha",
+
+  "chat.open": "Abrir",
+  "chat.open_in_browser": "Abrir no navegador"
 }
