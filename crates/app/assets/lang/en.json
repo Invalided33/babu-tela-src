@@ -650,5 +650,22 @@
   "music.already_fetching": "Already fetching another song. Hold on a moment.",
   "music.read_failed": "Couldn't read the song: {e}",
   "music.stopped": "Music stopped: {e}",
-  "music.youtube_login": "YouTube asked for a login. Sign in to YouTube in Chrome, Edge, Firefox, Brave, Opera or Vivaldi and try again ({detail})."
+  "music.youtube_login": "YouTube asked for a login. Sign in to YouTube in Chrome, Edge, Firefox, Brave, Opera or Vivaldi and try again ({detail}).",
+
+  "google.no_client": "The server didn't say how to sign in with Google.",
+  "google.no_wait": "Couldn't wait for Google's response: {e}",
+  "google.no_browser": "Couldn't open the browser: {e}",
+  "google.timeout": "The Google sign-in took too long. Try again.",
+  "google.done_title": "Done!",
+  "google.done_text": "You can close this tab and go back to Babu Tela.",
+  "google.page_failed": "Couldn't sign in",
+  "google.page_not_found": "Page not found",
+  "google.cancelled": "The Google sign-in was cancelled.",
+  "google.denied": "Google didn't allow the sign-in ({error}).",
+  "google.no_code": "Google didn't send the sign-in code.",
+
+  "tray.open": "Open {name}",
+  "tray.toggle_mic": "Toggle microphone",
+  "tray.toggle_audio": "Toggle audio",
+  "tray.quit": "Quit"
 }

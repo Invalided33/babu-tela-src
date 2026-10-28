@@ -650,5 +650,22 @@
   "music.already_fetching": "Já estou buscando outra música. Espera um pouquinho.",
   "music.read_failed": "Música não pôde ser lida: {e}",
   "music.stopped": "Música parou: {e}",
-  "music.youtube_login": "YouTube pediu login. Entre no YouTube pelo Chrome, Edge, Firefox, Brave, Opera ou Vivaldi e tente de novo ({detail})."
+  "music.youtube_login": "YouTube pediu login. Entre no YouTube pelo Chrome, Edge, Firefox, Brave, Opera ou Vivaldi e tente de novo ({detail}).",
+
+  "google.no_client": "O servidor não disse como entrar com o Google.",
+  "google.no_wait": "Não consegui esperar a resposta do Google: {e}",
+  "google.no_browser": "Não consegui abrir o navegador: {e}",
+  "google.timeout": "O login com o Google demorou demais. Tente de novo.",
+  "google.done_title": "Pronto!",
+  "google.done_text": "Você já pode fechar esta aba e voltar ao Babu Tela.",
+  "google.page_failed": "Não deu para entrar",
+  "google.page_not_found": "Página não encontrada",
+  "google.cancelled": "O login com o Google foi cancelado.",
+  "google.denied": "O Google não deixou entrar ({error}).",
+  "google.no_code": "O Google não mandou o código de login.",
+
+  "tray.open": "Abrir {name}",
+  "tray.toggle_mic": "Ligar/desligar microfone",
+  "tray.toggle_audio": "Ligar/desligar áudio",
+  "tray.quit": "Sair"
 }

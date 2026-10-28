@@ -74,14 +74,14 @@ pub fn start(on: impl Fn(TrayAction) + Send + Sync + 'static) -> Result<(), Stri
 
     let menu = Menu::new();
     menu.append_items(&[
-        &MenuItem::with_id("open", format!("Abrir {NAME}"), true, None),
+        &MenuItem::with_id("open", crate::tf!("tray.open", name = NAME), true, None),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id("mute", "Ligar/desligar microfone", true, None),
-        &MenuItem::with_id("deafen", "Ligar/desligar áudio", true, None),
+        &MenuItem::with_id("mute", crate::t!("tray.toggle_mic"), true, None),
+        &MenuItem::with_id("deafen", crate::t!("tray.toggle_audio"), true, None),
         &PredefinedMenuItem::separator(),
         // Not the predefined Quit item: that one ends the window's message
         // loop behind the app's back.
-        &MenuItem::with_id("quit", "Sair", true, None),
+        &MenuItem::with_id("quit", crate::t!("tray.quit"), true, None),
     ])
     .map_err(|e| e.to_string())?;
     let mut builder = TrayIconBuilder::new()

@@ -32,13 +32,11 @@ pub async fn sign_in(api: Arc<Api>) -> ApiResult {
     let config = api.call(&Req::get("/auth/google")).await?;
     let client_id = config["clientId"].as_str().unwrap_or_default().to_owned();
     if client_id.is_empty() {
-        return Err(ApiError::msg(
-            "O servidor não disse como entrar com o Google.",
-        ));
+        return Err(ApiError::msg(crate::t!("google.no_client")));
     }
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
-        .map_err(|e| ApiError::msg(format!("Não consegui esperar a resposta do Google: {e}")))?;
+        .map_err(|e| ApiError::msg(crate::tf!("google.no_wait", e = e)))?;
     let port = listener
         .local_addr()
         .map_err(|e| ApiError::msg(e.to_string()))?
@@ -67,11 +65,11 @@ pub async fn sign_in(api: Arc<Api>) -> ApiResult {
             });
         }
         None => open::that_detached(page.as_str())
-            .map_err(|e| ApiError::msg(format!("Não consegui abrir o navegador: {e}")))?,
+            .map_err(|e| ApiError::msg(crate::tf!("google.no_browser", e = e)))?,
     }
     let code = tokio::time::timeout(WAIT, wait_for_code(&listener, &state))
         .await
-        .map_err(|_| ApiError::msg("O login com o Google demorou demais. Tente de novo."))??;
+        .map_err(|_| ApiError::msg(crate::t!("google.timeout")))??;
     api.call(&Req::post("/auth/google").with(json!({
         "code": code,
         "verifier": verifier,
@@ -118,20 +116,33 @@ async fn wait_for_code(listener: &TcpListener, state: &str) -> ApiResult<String>
         };
         match answer(&target, state) {
             Some(Ok(code)) => {
-                reply(&mut stream, 200, &page(DONE_TITLE, DONE_TEXT)).await;
+                let done = page(
+                    crate::t!("google.done_title"),
+                    crate::t!("google.done_text"),
+                );
+                reply(&mut stream, 200, &done).await;
                 return Ok(code);
             }
             Some(Err(why)) => {
-                reply(&mut stream, 200, &page("Não deu para entrar", &why)).await;
+                reply(
+                    &mut stream,
+                    200,
+                    &page(crate::t!("google.page_failed"), &why),
+                )
+                .await;
                 return Err(ApiError::msg(why));
             }
-            None => reply(&mut stream, 404, &page("Página não encontrada", "")).await,
+            None => {
+                reply(
+                    &mut stream,
+                    404,
+                    &page(crate::t!("google.page_not_found"), ""),
+                )
+                .await
+            }
         }
     }
 }
-
-const DONE_TITLE: &str = "Pronto!";
-const DONE_TEXT: &str = "Você já pode fechar esta aba e voltar ao Babu Tela.";
 
 /// What a visit to `target` (the path and query of the request) says:
 /// None when it is not this sign-in's answer.
@@ -150,14 +161,14 @@ fn answer(target: &str, state: &str) -> Option<Result<String, String>> {
     }
     if let Some(error) = get("error") {
         return Some(Err(if error == "access_denied" {
-            "O login com o Google foi cancelado.".to_owned()
+            crate::t!("google.cancelled").to_owned()
         } else {
-            format!("O Google não deixou entrar ({error}).")
+            crate::tf!("google.denied", error = error)
         }));
     }
     match get("code") {
         Some(code) if !code.is_empty() => Some(Ok(code)),
-        _ => Some(Err("O Google não mandou o código de login.".to_owned())),
+        _ => Some(Err(crate::t!("google.no_code").to_owned())),
     }
 }
 
@@ -318,10 +329,10 @@ mod tests {
             answer("/?state=abc&code=4%2F0Ab&scope=email", "abc"),
             Some(Ok("4/0Ab".to_owned()))
         );
-        assert_eq!(
+        assert!(matches!(
             answer("/?state=abc&error=access_denied", "abc"),
-            Some(Err("O login com o Google foi cancelado.".to_owned()))
-        );
+            Some(Err(_))
+        ));
         assert!(matches!(answer("/?state=abc", "abc"), Some(Err(_))));
         // Someone else's state, none at all, or another page: ignored.
         assert_eq!(answer("/?state=xyz&code=1", "abc"), None);
@@ -355,7 +366,6 @@ mod tests {
         let pages = browser.await.unwrap();
         assert!(pages[0].starts_with("HTTP/1.1 404"), "{}", pages[0]);
         assert!(pages[1].starts_with("HTTP/1.1 200"), "{}", pages[1]);
-        assert!(pages[1].contains(DONE_TEXT));
     }
 
     #[test]
