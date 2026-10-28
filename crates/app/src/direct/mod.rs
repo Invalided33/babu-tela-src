@@ -396,18 +396,15 @@ pub enum Card {
 /// may help.
 pub fn failure(why: &str, who: &str) -> (String, bool) {
     if let Some(disk) = why.strip_prefix("disk:") {
-        return (format!("Não deu para gravar o arquivo: {disk}"), true);
+        return (crate::tf!("direct.fail_disk", disk = disk), true);
     }
     match Stop::from_wire(why) {
-        Stop::Changed => (
-            format!("O arquivo mudou no PC de {who} desde que foi enviado."),
-            false,
-        ),
-        Stop::Gone => (format!("{who} não compartilha mais este arquivo."), false),
-        Stop::Denied => ("Você não tem mais acesso a este arquivo.".into(), false),
-        Stop::Unreadable => (format!("O PC de {who} não conseguiu ler o arquivo."), true),
-        Stop::Corrupt => ("O arquivo veio diferente do que foi enviado.".into(), true),
-        Stop::Offline | Stop::Busy => (format!("{who} não pôde enviar agora."), true),
+        Stop::Changed => (crate::tf!("direct.fail_changed", who = who), false),
+        Stop::Gone => (crate::tf!("direct.fail_gone", who = who), false),
+        Stop::Denied => (crate::t!("direct.fail_denied").to_owned(), false),
+        Stop::Unreadable => (crate::tf!("direct.fail_unreadable", who = who), true),
+        Stop::Corrupt => (crate::t!("direct.fail_corrupt").to_owned(), true),
+        Stop::Offline | Stop::Busy => (crate::tf!("direct.fail_busy", who = who), true),
     }
 }
 

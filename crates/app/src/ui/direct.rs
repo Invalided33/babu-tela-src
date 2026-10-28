@@ -13,6 +13,7 @@ use crate::direct::{self, Card, Phase, Wait};
 use crate::icons::Icon;
 use crate::model::{Attachment, Message, Status};
 use crate::theme::{self, *};
+use crate::{t, tf};
 
 /// The widest a card gets.
 const WIDTH: f32 = 460.0;
@@ -44,13 +45,17 @@ pub fn card(ui: &mut Ui, core: &Core, m: &Message, a: &Attachment, acts: &mut Ac
                     ui.spacing_mut().item_spacing.y = 0.0;
                     widgets::ellipsis(ui, &a.name, theme::body(), TEXT);
                     let from = if mine {
-                        "do seu PC".to_owned()
+                        t!("direct.from_me").to_owned()
                     } else {
-                        format!("do PC de {who}")
+                        tf!("direct.from_pc", who = who)
                     };
                     line(
                         ui,
-                        &format!("{} · direto {from}", widgets::fmt_size(a.size)),
+                        &tf!(
+                            "direct.subtitle",
+                            size = widgets::fmt_size(a.size),
+                            from = from
+                        ),
                         MUTED,
                     );
                 });
@@ -90,34 +95,30 @@ fn body(
     acts: &mut Acts,
 ) {
     match state {
-        Card::Broken => line(ui, "Este anexo veio incompleto.", FAINT),
-        Card::Elsewhere => line(
-            ui,
-            "Enviado de outro PC seu: só ele compartilha este arquivo.",
-            FAINT,
-        ),
-        Card::Stopped => line(ui, "Você parou de compartilhar este arquivo.", FAINT),
+        Card::Broken => line(ui, t!("direct.broken"), FAINT),
+        Card::Elsewhere => line(ui, t!("direct.elsewhere"), FAINT),
+        Card::Stopped => line(ui, t!("direct.stopped"), FAINT),
         Card::Sharing { sending, waiting } => {
             let mut text = match sending {
-                0 => "Compartilhando deste PC enquanto o app estiver aberto.".to_owned(),
-                1 => "Enviando para 1 pessoa agora.".to_owned(),
-                n => format!("Enviando para {n} pessoas agora."),
+                0 => t!("direct.sharing_idle").to_owned(),
+                1 => t!("direct.sharing_one").to_owned(),
+                n => tf!("direct.sharing_many", n = n),
             };
             if *waiting > 0 {
-                text.push_str(&format!(" {waiting} na fila."));
+                text.push_str(&tf!("direct.queue", n = waiting));
             }
             line(ui, &text, MUTED);
             if let Some(n) = as_number(id)
-                && Button::ghost("Parar de compartilhar")
+                && Button::ghost(t!("direct.stop_sharing"))
                     .small()
                     .show(ui)
                     .clicked()
             {
                 acts.later(move |c| {
                     c.confirm(
-                        "Parar de compartilhar",
-                        "Quem ainda não baixou não vai conseguir baixar, e downloads em andamento param.",
-                        "Parar",
+                        t!("direct.stop_title"),
+                        t!("direct.stop_body"),
+                        t!("direct.stop_confirm"),
                         Action::StopSharing(n),
                     );
                 });
@@ -126,12 +127,16 @@ fn body(
         Card::Offer => {
             let online = core.user(m.author_id()).status != Status::Offline;
             let text = if online {
-                format!("Fica disponível enquanto {who} estiver com o app aberto.")
+                tf!("direct.offer_online", who = who)
             } else {
-                format!("{who} parece offline: o download começa quando {who} voltar.")
+                tf!("direct.offer_offline", who = who)
             };
             line(ui, &text, MUTED);
-            if Button::primary("Baixar").small().show(ui).clicked() {
+            if Button::primary(t!("direct.download"))
+                .small()
+                .show(ui)
+                .clicked()
+            {
                 let (a, msg, cid, from) = (a.clone(), m.id, m.channel_id, m.author_id());
                 acts.later(move |c| c.save_direct(a, msg, cid, from));
             }
@@ -150,12 +155,15 @@ fn body(
             );
             ui.horizontal(|ui| {
                 if matches!(phase, Phase::Waiting(_) | Phase::Busy | Phase::Retrying)
-                    && Button::primary("Tentar agora").small().show(ui).clicked()
+                    && Button::primary(t!("direct.try_now"))
+                        .small()
+                        .show(ui)
+                        .clicked()
                 {
                     let id = id.to_owned();
                     acts.later(move |c| c.direct.resume(&id));
                 }
-                if Button::ghost("Pausar").small().show(ui).clicked() {
+                if Button::ghost(t!("direct.pause")).small().show(ui).clicked() {
                     let id = id.to_owned();
                     acts.later(move |c| c.direct.pause(&id));
                 }
@@ -166,16 +174,20 @@ fn body(
             bar(ui, *done, total, false);
             line(
                 ui,
-                &format!(
-                    "Pausado · {} de {} ({}%)",
-                    widgets::fmt_size(*done as i64),
-                    widgets::fmt_size(total as i64),
-                    percent(*done, total)
+                &tf!(
+                    "direct.paused",
+                    done = widgets::fmt_size(*done as i64),
+                    total = widgets::fmt_size(total as i64),
+                    pct = percent(*done, total)
                 ),
                 MUTED,
             );
             ui.horizontal(|ui| {
-                if Button::primary("Continuar").small().show(ui).clicked() {
+                if Button::primary(t!("direct.resume"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     let id = id.to_owned();
                     acts.later(move |c| c.direct.resume(&id));
                 }
@@ -186,11 +198,20 @@ fn body(
             let (text, retry) = direct::failure(why, who);
             line(ui, &text, DANGER);
             ui.horizontal(|ui| {
-                if retry && Button::primary("Tentar de novo").small().show(ui).clicked() {
+                if retry
+                    && Button::primary(t!("direct.try_again"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                {
                     let id = id.to_owned();
                     acts.later(move |c| c.direct.resume(&id));
                 }
-                if Button::ghost("Remover").small().show(ui).clicked() {
+                if Button::ghost(t!("settings.remove"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     let id = id.to_owned();
                     acts.later(move |c| c.direct.cancel(&id));
                 }
@@ -205,14 +226,18 @@ fn body(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add(Icon::Folder.image(crate::icons::SMALL, ONLINE));
-                line(ui, &format!("Baixado em {place}."), ONLINE);
+                line(ui, &tf!("direct.downloaded", place = place), ONLINE);
             });
             ui.horizontal(|ui| {
-                if Button::primary("Abrir").small().show(ui).clicked() {
+                if Button::primary(t!("chat.open")).small().show(ui).clicked() {
                     let (id, path) = (id.to_owned(), path.clone());
                     acts.later(move |c| c.open_direct(&id, path, false));
                 }
-                if Button::ghost("Mostrar na pasta").small().show(ui).clicked() {
+                if Button::ghost(t!("direct.show_in_folder"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     let (id, path) = (id.to_owned(), path.clone());
                     acts.later(move |c| c.open_direct(&id, path, true));
                 }
@@ -224,13 +249,16 @@ fn body(
 /// "Cancelar", which asks first: what was downloaded goes too.
 fn cancel(ui: &mut Ui, id: &str, acts: &mut Acts) {
     if let Some(n) = as_number(id)
-        && Button::ghost("Cancelar").small().show(ui).clicked()
+        && Button::ghost(t!("common.cancel"))
+            .small()
+            .show(ui)
+            .clicked()
     {
         acts.later(move |c| {
             c.confirm(
-                "Cancelar download",
-                "O que já foi baixado deste arquivo vai ser apagado.",
-                "Cancelar download",
+                t!("direct.cancel_title"),
+                t!("direct.cancel_body"),
+                t!("direct.cancel_title"),
                 Action::CancelDownload(n),
             );
         });
@@ -262,14 +290,14 @@ fn percent(done: u64, total: u64) -> u32 {
 /// What a download that should be going says.
 fn going(phase: Phase, done: u64, total: u64, speed: f64, relayed: bool, who: &str) -> String {
     match phase {
-        Phase::Connecting | Phase::Idle => format!("Conectando ao PC de {who}…"),
-        Phase::Queued => format!("Na fila: {who} está enviando para outras pessoas."),
+        Phase::Connecting | Phase::Idle => tf!("direct.connecting", who = who),
+        Phase::Queued => tf!("direct.queued", who = who),
         Phase::Receiving => {
-            let mut text = format!(
-                "{} de {} · {}%",
-                widgets::fmt_size(done as i64),
-                widgets::fmt_size(total as i64),
-                percent(done, total)
+            let mut text = tf!(
+                "direct.progress",
+                done = widgets::fmt_size(done as i64),
+                total = widgets::fmt_size(total as i64),
+                pct = percent(done, total)
             );
             if speed >= 1.0 {
                 text.push_str(&format!(" · {}/s", widgets::fmt_size(speed as i64)));
@@ -277,23 +305,15 @@ fn going(phase: Phase, done: u64, total: u64, speed: f64, relayed: bool, who: &s
                 text.push_str(&format!(" · {}", eta(left)));
             }
             if relayed {
-                text.push_str(" · pelo relay");
+                text.push_str(t!("direct.via_relay"));
             }
             text
         }
-        Phase::Retrying => "A conexão caiu. Tentando de novo…".to_owned(),
-        Phase::Waiting(Wait::Offline) => {
-            format!("{who} está offline. Continua quando {who} voltar.")
-        }
-        Phase::Waiting(Wait::NoAnswer) => format!(
-            "{who} não respondeu: o app precisa estar aberto no PC que enviou. Continua quando {who} voltar."
-        ),
-        Phase::Waiting(Wait::Cut) => {
-            format!("A conexão com {who} caiu várias vezes. Continua quando {who} voltar.")
-        }
-        Phase::Busy => {
-            format!("{who} está enviando para muita gente. Tentando de novo daqui a pouco.")
-        }
+        Phase::Retrying => t!("direct.retrying").to_owned(),
+        Phase::Waiting(Wait::Offline) => tf!("direct.wait_offline", who = who),
+        Phase::Waiting(Wait::NoAnswer) => tf!("direct.wait_no_answer", who = who),
+        Phase::Waiting(Wait::Cut) => tf!("direct.wait_cut", who = who),
+        Phase::Busy => tf!("direct.busy", who = who),
     }
 }
 
@@ -301,11 +321,15 @@ fn going(phase: Phase, done: u64, total: u64, speed: f64, relayed: bool, who: &s
 fn eta(secs: f64) -> String {
     let s = secs.round() as u64;
     let (h, m) = (s / 3600, (s % 3600) / 60);
-    match (h, m) {
-        (0, 0) => format!("falta{} {s} s", if s == 1 { "" } else { "m" }),
-        (0, 1) => "falta 1 min".to_owned(),
-        (0, m) => format!("faltam {m} min"),
-        (h, 0) => format!("falta{} {h} h", if h == 1 { "" } else { "m" }),
-        (h, m) => format!("falta{} {h} h {m} min", if h == 1 { "" } else { "m" }),
+    let (d, one) = match (h, m) {
+        (0, 0) => (format!("{s} s"), s == 1),
+        (0, m) => (format!("{m} min"), m == 1),
+        (h, 0) => (format!("{h} h"), h == 1),
+        (h, m) => (format!("{h} h {m} min"), h == 1),
+    };
+    if one {
+        tf!("direct.eta_one", d = d)
+    } else {
+        tf!("direct.eta_many", d = d)
     }
 }
