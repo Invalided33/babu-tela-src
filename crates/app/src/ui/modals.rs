@@ -133,7 +133,7 @@ fn body(ui: &mut Ui, core: &mut Core, m: &mut Modal, focus: bool, acts: &mut Act
         Modal::Player { attachment } => {
             super::player::enlarged(ui, core, attachment, acts);
             foot(ui, |ui| {
-                if Button::ghost("Fechar").show(ui).clicked() {
+                if Button::ghost(t!("common.close")).show(ui).clicked() {
                     acts.later(Core::close_modal);
                 }
             });
@@ -158,7 +158,7 @@ fn body(ui: &mut Ui, core: &mut Core, m: &mut Modal, focus: bool, acts: &mut Act
                 if Button::danger(label).show(ui).clicked() {
                     acts.later(move |c| c.confirmed(action));
                 }
-                if Button::ghost("Cancelar").show(ui).clicked() {
+                if Button::ghost(t!("common.cancel")).show(ui).clicked() {
                     acts.later(Core::close_modal);
                 }
             });
@@ -171,43 +171,20 @@ fn body(ui: &mut Ui, core: &mut Core, m: &mut Modal, focus: bool, acts: &mut Act
 /// who made them, under which licence, and the full text of the font
 /// licence, which has to go with every copy of the font.
 fn licenses(ui: &mut Ui, acts: &mut Acts) {
-    widgets::h3(ui, "Licenças");
-    widgets::sub(
-        ui,
-        "O Babu Tela usa estas obras de outras pessoas, cada uma sob a sua licença.",
-    );
+    widgets::h3(ui, t!("modal.licenses_title"));
+    widgets::sub(ui, t!("modal.licenses_intro"));
     let items = [
+        ("Noto Color Emoji", t!("modal.license_noto")),
+        ("Twemoji Country Flags", t!("modal.license_twemoji")),
         (
-            "Noto Color Emoji",
-            "Os emoji que o Windows ainda não desenha. Copyright 2022 Google Inc., sob a SIL \
-             Open Font License 1.1, cujo texto vem abaixo. github.com/googlefonts/noto-emoji",
+            t!("modal.license_emoji_list_name"),
+            t!("modal.license_emoji_list"),
         ),
+        ("DPDFNet", t!("modal.license_dpdfnet")),
+        ("BetterOffice", t!("modal.license_betteroffice")),
         (
-            "Twemoji Country Flags",
-            "As bandeiras: os desenhos do Twemoji, © X Corp. e colaboradores, sob a licença \
-             CC-BY 4.0 (creativecommons.org/licenses/by/4.0), separados numa fonte só de \
-             bandeiras por talkjs (github.com/talkjs/country-flag-emoji-polyfill, licença MIT).",
-        ),
-        (
-            "Lista de emoji e nomes em português",
-            "O emoji-test.txt do Unicode e os nomes do CLDR, © Unicode, Inc., sob a Licença \
-             Unicode v3, cujo texto vem abaixo. O app baixa esses arquivos do servidor do Babu \
-             Tela, que guarda uma cópia deles sem mudar nada; eles não vêm com o app.",
-        ),
-        (
-            "DPDFNet",
-            "A supressão de ruído por IA: o modelo da Ceva, sob a licença Apache 2.0 \
-             (github.com/ceva-ip/DPDFNet).",
-        ),
-        (
-            "BetterOffice",
-            "Desenha os slides das apresentações do PowerPoint, sob a licença Apache 2.0 \
-             (github.com/openooxml/betteroffice).",
-        ),
-        (
-            "Bibliotecas",
-            "E as bibliotecas em Rust de que o app é feito, cada uma sob a sua licença (MIT, \
-             Apache 2.0 e outras).",
+            t!("modal.license_libraries_name"),
+            t!("modal.license_libraries"),
         ),
     ];
     for (name, text) in items {
@@ -232,7 +209,7 @@ fn licenses(ui: &mut Ui, acts: &mut Acts) {
     );
     ui.add_space(14.0);
     ui.label(
-        egui::RichText::new("Licença Unicode v3")
+        egui::RichText::new(t!("modal.license_unicode_heading"))
             .font(theme::bold(14.0))
             .color(TEXT),
     );
@@ -242,7 +219,7 @@ fn licenses(ui: &mut Ui, acts: &mut Acts) {
             .color(FAINT),
     );
     foot(ui, |ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -338,16 +315,16 @@ fn add_server(
     focus: bool,
     acts: &mut Acts,
 ) {
-    widgets::h3(ui, "Criar um servidor");
-    widgets::sub(ui, "Um espaço para sua comunidade conversar.");
+    widgets::h3(ui, t!("modal.create_server_title"));
+    widgets::sub(ui, t!("modal.create_server_sub"));
     ui.add_space(12.0);
-    let r = widgets::field(ui, "Nome do servidor", name, 100, false);
+    let r = widgets::field(ui, t!("modal.server_name"), name, 100, false);
     if focus {
         r.request_focus();
     }
     widgets::error_line(ui, core.errors.get(&FormId::CreateServer));
     let busy = core.busy.contains(&FormId::CreateServer);
-    if (Button::primary("Criar servidor")
+    if (Button::primary(t!("modal.create_server_btn"))
         .wide()
         .enabled(!busy)
         .show(ui)
@@ -365,13 +342,13 @@ fn add_server(
         });
     }
     widgets::divider(ui);
-    widgets::h3(ui, "Entrar em um servidor");
-    widgets::sub(ui, "Cole o código de convite que você recebeu.");
+    widgets::h3(ui, t!("modal.join_server_title"));
+    widgets::sub(ui, t!("modal.join_server_sub"));
     ui.add_space(12.0);
-    let r = widgets::field(ui, "Código do convite", code, 200, false);
+    let r = widgets::field(ui, t!("modal.invite_code_label"), code, 200, false);
     widgets::error_line(ui, core.errors.get(&FormId::JoinServer));
     let busy = core.busy.contains(&FormId::JoinServer);
-    if (Button::ghost("Entrar")
+    if (Button::ghost(t!("modal.join_btn"))
         .wide()
         .enabled(!busy)
         .show(ui)
@@ -395,8 +372,8 @@ fn add_server(
     // Private servers I asked to join.
     if !core.join_requests.is_empty() {
         widgets::divider(ui);
-        widgets::h3(ui, "Pedidos enviados");
-        widgets::sub(ui, "Você entra assim que alguém do servidor aceitar.");
+        widgets::h3(ui, t!("modal.sent_requests_title"));
+        widgets::sub(ui, t!("modal.sent_requests_sub"));
         ui.add_space(8.0);
         for r in &core.join_requests {
             ui.horizontal(|ui| {
@@ -418,16 +395,20 @@ fn add_server(
                     ui.spacing_mut().item_spacing.y = 0.0;
                     widgets::ellipsis(ui, &r.server.name, theme::bold(14.0), TEXT);
                     ui.label(
-                        egui::RichText::new(format!(
-                            "Aguardando · {}",
-                            super::chat::fmt_time(r.created)
+                        egui::RichText::new(tf!(
+                            "modal.waiting_since",
+                            time = super::chat::fmt_time(r.created)
                         ))
                         .size(13.0)
                         .color(MUTED),
                     );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Button::ghost("Cancelar pedido").small().show(ui).clicked() {
+                    if Button::ghost(t!("modal.cancel_request_btn"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         let sid = r.server.id;
                         acts.later(move |c| c.cancel_request(sid));
                     }
@@ -449,32 +430,38 @@ fn new_channel(
     focus: bool,
     acts: &mut Acts,
 ) {
-    widgets::h3(ui, "Criar canal");
+    widgets::h3(ui, t!("modal.create_channel"));
     let server = core.server(sid).map(|s| s.name.clone()).unwrap_or_default();
-    widgets::sub(ui, &format!("em {server}"));
+    widgets::sub(ui, &tf!("modal.in_server", server = server));
     ui.add_space(12.0);
     let mut k = usize::from(*kind == ChannelKind::Voice);
-    if select(ui, "new-channel-kind", "Tipo", &mut k, &["Texto", "Voz"]) {
+    if select(
+        ui,
+        "new-channel-kind",
+        t!("modal.kind_label"),
+        &mut k,
+        &[t!("modal.kind_text"), t!("modal.kind_voice")],
+    ) {
         *kind = if k == 1 {
             ChannelKind::Voice
         } else {
             ChannelKind::Text
         };
     }
-    let r = widgets::field(ui, "Nome do canal", name, 100, false);
+    let r = widgets::field(ui, t!("modal.channel_name"), name, 100, false);
     if focus {
         r.request_focus();
     }
-    widgets::field(ui, "Categoria", category, 100, false);
+    widgets::field(ui, t!("modal.category"), category, 100, false);
     widgets::error_line(ui, core.errors.get(&FormId::CreateChannel));
     let busy = core.busy.contains(&FormId::CreateChannel);
     let mut go = submitted(ui, &r);
     foot(ui, |ui| {
-        go |= Button::primary("Criar canal")
+        go |= Button::primary(t!("modal.create_channel"))
             .enabled(!busy)
             .show(ui)
             .clicked();
-        if Button::ghost("Cancelar").show(ui).clicked() {
+        if Button::ghost(t!("common.cancel")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -499,11 +486,20 @@ fn quick_channel(
     let Some(s) = core.server(sid) else { return };
     let mixed = category_mixes_kinds(s, category);
     widgets::h3(ui, quick_title(mixed, *kind));
-    widgets::sub(ui, &format!("em {category} · {}", s.name));
+    widgets::sub(
+        ui,
+        &tf!("modal.in_category", category = category, server = s.name),
+    );
     ui.add_space(12.0);
     if mixed {
         let mut k = usize::from(*kind == ChannelKind::Voice);
-        if select(ui, "quick-channel-kind", "Tipo", &mut k, &["Texto", "Voz"]) {
+        if select(
+            ui,
+            "quick-channel-kind",
+            t!("modal.kind_label"),
+            &mut k,
+            &[t!("modal.kind_text"), t!("modal.kind_voice")],
+        ) {
             *kind = if k == 1 {
                 ChannelKind::Voice
             } else {
@@ -511,7 +507,7 @@ fn quick_channel(
             };
         }
     }
-    let r = widgets::field(ui, "Nome do canal", name, 100, false);
+    let r = widgets::field(ui, t!("modal.channel_name"), name, 100, false);
     if focus {
         r.request_focus();
     }
@@ -519,8 +515,11 @@ fn quick_channel(
     let busy = core.busy.contains(&FormId::CreateChannel);
     let mut go = submitted(ui, &r);
     foot(ui, |ui| {
-        go |= Button::primary("Criar").enabled(!busy).show(ui).clicked();
-        if Button::ghost("Cancelar").show(ui).clicked() {
+        go |= Button::primary(t!("modal.create_btn"))
+            .enabled(!busy)
+            .show(ui)
+            .clicked();
+        if Button::ghost(t!("common.cancel")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -543,9 +542,9 @@ pub(super) fn category_mixes_kinds(s: &Server, category: &str) -> bool {
 /// What the "+" of a category makes (its title and its tip).
 pub(super) fn quick_title(mixed: bool, kind: ChannelKind) -> &'static str {
     match (mixed, kind) {
-        (true, _) => "Criar canal nesta categoria",
-        (false, ChannelKind::Voice) => "Criar canal de voz",
-        (false, _) => "Criar canal de texto",
+        (true, _) => t!("modal.quick_channel_category"),
+        (false, ChannelKind::Voice) => t!("modal.quick_channel_voice"),
+        (false, _) => t!("modal.quick_channel_text"),
     }
 }
 
@@ -576,27 +575,32 @@ fn edit_channel(
     };
     let Some(c) = s.channel(cid) else { return };
     let voice = c.is_voice();
-    widgets::h3(ui, "Editar canal");
+    widgets::h3(ui, t!("modal.edit_channel_title"));
     widgets::sub(
         ui,
         if voice {
-            "Canal de voz"
+            t!("modal.voice_channel")
         } else {
-            "Canal de texto"
+            t!("modal.text_channel")
         },
     );
     ui.add_space(12.0);
-    let r = widgets::field(ui, "Nome", name, 100, false);
+    let r = widgets::field(ui, t!("modal.name"), name, 100, false);
     if focus {
         r.request_focus();
     }
     if !voice {
-        widgets::field(ui, "Assunto", topic, 1024, false);
+        widgets::field(ui, t!("modal.topic"), topic, 1024, false);
     }
-    widgets::field(ui, "Categoria", category, 100, false);
+    widgets::field(ui, t!("modal.category"), category, 100, false);
     widgets::error_line(ui, core.errors.get(&FormId::EditChannel));
     let busy = core.busy.contains(&FormId::EditChannel);
-    if Button::primary("Salvar").enabled(!busy).show(ui).clicked() && !busy {
+    if Button::primary(t!("modal.save"))
+        .enabled(!busy)
+        .show(ui)
+        .clicked()
+        && !busy
+    {
         let mut body = json!({ "name": name.trim(), "category": category.trim() });
         if !voice {
             body["topic"] = json!(topic.trim());
@@ -604,26 +608,26 @@ fn edit_channel(
         acts.later(move |c| {
             c.call(
                 Req::patch(format!("/channels/{cid}")).with(body),
-                Then::Toast("Canal salvo.".into()),
+                Then::Toast(t!("modal.channel_saved").into()),
                 ErrTo::Form(FormId::EditChannel),
             )
         });
     }
     if s.can(P_MANAGE_ROLES) {
         widgets::divider(ui);
-        widgets::h3(ui, "Permissões deste canal");
-        widgets::sub(
-            ui,
-            "“Negar” em @todos esconde o canal de quem não tiver um cargo com “Permitir”.",
-        );
+        widgets::h3(ui, t!("modal.channel_perms_title"));
+        widgets::sub(ui, t!("modal.channel_perms_sub"));
         ui.add_space(8.0);
         let bits: &[(i64, &str)] = if voice {
-            &[(P_VIEW, "Ver canal"), (P_CONNECT, "Conectar")]
+            &[
+                (P_VIEW, t!("modal.perm_view")),
+                (P_CONNECT, t!("modal.perm_connect")),
+            ]
         } else {
             &[
-                (P_VIEW, "Ver canal"),
-                (P_SEND, "Enviar"),
-                (P_ATTACH, "Anexar"),
+                (P_VIEW, t!("modal.perm_view")),
+                (P_SEND, t!("modal.perm_send")),
+                (P_ATTACH, t!("modal.perm_attach")),
             ]
         };
         egui::Grid::new("overrides")
@@ -631,7 +635,7 @@ fn edit_channel(
             .spacing(vec2(12.0, 8.0))
             .striped(false)
             .show(ui, |ui| {
-                widgets::caption(ui, "Cargo");
+                widgets::caption(ui, t!("modal.role"));
                 for (_, label) in bits {
                     widgets::caption(ui, label);
                 }
@@ -659,11 +663,17 @@ fn edit_channel(
                         let before = v;
                         ComboBox::from_id_salt(("ov", cid, role.id, bit))
                             .width(110.0)
-                            .selected_text(["Padrão", "Permitir", "Negar"][v])
+                            .selected_text(
+                                [
+                                    t!("modal.override_default"),
+                                    t!("modal.override_allow"),
+                                    t!("modal.override_deny"),
+                                ][v],
+                            )
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut v, 0, "Padrão");
-                                ui.selectable_value(&mut v, 1, "Permitir");
-                                ui.selectable_value(&mut v, 2, "Negar");
+                                ui.selectable_value(&mut v, 0, t!("modal.override_default"));
+                                ui.selectable_value(&mut v, 1, t!("modal.override_allow"));
+                                ui.selectable_value(&mut v, 2, t!("modal.override_deny"));
                             });
                         if v != before {
                             let (mut allow, mut deny) = (o.allow & !bit, o.deny & !bit);
@@ -689,18 +699,21 @@ fn edit_channel(
     }
     ui.add_space(18.0);
     ui.horizontal(|ui| {
-        if Button::danger("Excluir canal").show(ui).clicked() {
+        if Button::danger(t!("modal.delete_channel"))
+            .show(ui)
+            .clicked()
+        {
             acts.later(move |c| {
                 c.confirm(
-                    "Excluir canal",
-                    "O canal e todas as mensagens dele serão apagados. Isso não pode ser desfeito.",
-                    "Excluir canal",
+                    t!("modal.delete_channel"),
+                    t!("modal.delete_channel_body"),
+                    t!("modal.delete_channel"),
                     Action::DeleteChannel(cid),
                 )
             });
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if Button::ghost("Fechar").show(ui).clicked() {
+            if Button::ghost(t!("common.close")).show(ui).clicked() {
                 acts.later(Core::close_modal);
             }
         });
@@ -708,23 +721,19 @@ fn edit_channel(
 }
 
 fn invite(ui: &mut Ui, core: &Core, code: &str, acts: &mut Acts) {
-    widgets::h3(ui, "Convidar pessoas");
+    widgets::h3(ui, t!("modal.invite_title"));
     // The invite is for the server on screen (`Core::invite`).
     let private = core.current_server().is_some_and(|s| s.private);
     widgets::sub(
         ui,
         if private {
-            "Envie este código. Quem receber pede para entrar pelo botão “+” na barra lateral, e entra quando alguém daqui aceitar."
+            t!("modal.invite_sub_private")
         } else {
-            "Envie este código. Quem receber entra pelo botão “+” na barra lateral."
+            t!("modal.invite_sub_public")
         },
     );
     if code.contains('.') {
-        widgets::sub(
-            ui,
-            "A parte depois do ponto nunca vai para o servidor: é com ela que quem entra assina a \
-             entrada, e só quem tem o convite inteiro recebe as mensagens cifradas daqui.",
-        );
+        widgets::sub(ui, t!("modal.invite_secret_note"));
     }
     ui.add_space(12.0);
     ui.horizontal(|ui| {
@@ -741,13 +750,13 @@ fn invite(ui: &mut Ui, core: &Core, code: &str, acts: &mut Acts) {
                     .font(theme::body()),
             );
         });
-        if Button::primary("Copiar").show(ui).clicked() {
+        if Button::primary(t!("modal.copy_btn")).show(ui).clicked() {
             ui.ctx().copy_text(code.to_owned());
-            acts.later(|c| c.toast("Código copiado."));
+            acts.later(|c| c.toast(t!("modal.code_copied")));
         }
     });
     foot(ui, |ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -765,23 +774,18 @@ pub fn tor_text(status: &crate::tor::Status) -> String {
 
 /// How long the messages of a conversation last (sealing.rs `set_ttl`).
 fn ttl(ui: &mut Ui, core: &Core, cid: i64, acts: &mut Acts) {
-    widgets::h3(ui, "Mensagens temporárias");
-    widgets::sub(
-        ui,
-        "As mensagens enviadas daqui em diante somem para todos depois do tempo escolhido: do app \
-         de cada um e do servidor. Alguns dias depois, as chaves que as abriam são apagadas de \
-         todos os PCs, e aí nem o servidor junto com um PC roubado consegue lê-las de novo. As \
-         que já estão aqui continuam como estão.",
-    );
-    widgets::sub(
-        ui,
-        "Quem lê ainda pode copiar o texto ou fotografar a tela antes de a mensagem sumir.",
-    );
+    widgets::h3(ui, t!("modal.ttl_title"));
+    widgets::sub(ui, t!("modal.ttl_body1"));
+    widgets::sub(ui, t!("modal.ttl_body2"));
     ui.add_space(12.0);
     let now = core.ttl_of(cid);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        for (secs, label) in [(0, "Desligadas"), (86_400, "1 dia"), (7 * 86_400, "7 dias")] {
+        for (secs, label) in [
+            (0, t!("modal.ttl_off")),
+            (86_400, t!("modal.ttl_1day")),
+            (7 * 86_400, t!("modal.ttl_7days")),
+        ] {
             let text = if secs == now {
                 format!("✓ {label}")
             } else {
@@ -802,7 +806,7 @@ fn ttl(ui: &mut Ui, core: &Core, cid: i64, acts: &mut Acts) {
         }
     });
     foot(ui, |ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -818,7 +822,7 @@ fn server_settings(
     acts: &mut Acts,
 ) {
     let Some(s) = core.server(sid) else { return };
-    widgets::h3(ui, "Configurações do servidor");
+    widgets::h3(ui, t!("modal.server_settings_title"));
     if s.can(P_MANAGE_SERVER) {
         ui.add_space(12.0);
         // The picture, as the rail shows it.
@@ -837,13 +841,22 @@ fn server_settings(
             );
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
-                widgets::sub(ui, "A imagem que aparece na barra de servidores.");
+                widgets::sub(ui, t!("modal.server_icon_hint"));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if Button::ghost("Trocar imagem").small().show(ui).clicked() {
+                    if Button::ghost(t!("modal.change_image_btn"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         acts.later(move |c| c.pick_files(Pick::ServerIcon(sid)));
                     }
-                    if s.icon.is_some() && Button::ghost("Remover").small().show(ui).clicked() {
+                    if s.icon.is_some()
+                        && Button::ghost(t!("settings.remove"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                    {
                         acts.later(move |c| {
                             c.call(
                                 Req::patch(format!("/servers/{sid}")).with(json!({ "icon": null })),
@@ -856,10 +869,10 @@ fn server_settings(
             });
         });
         ui.add_space(14.0);
-        let r = widgets::field(ui, "Nome do servidor", name, 100, false);
+        let r = widgets::field(ui, t!("modal.server_name"), name, 100, false);
         widgets::error_line(ui, core.errors.get(&FormId::RenameServer));
         let busy = core.busy.contains(&FormId::RenameServer);
-        if (Button::primary("Salvar nome")
+        if (Button::primary(t!("modal.save_name_btn"))
             .enabled(!busy)
             .show(ui)
             .clicked()
@@ -870,7 +883,7 @@ fn server_settings(
             acts.later(move |c| {
                 c.call(
                     Req::patch(format!("/servers/{sid}")).with(json!({ "name": n })),
-                    Then::Toast("Nome salvo.".into()),
+                    Then::Toast(t!("modal.name_saved").into()),
                     ErrTo::Form(FormId::RenameServer),
                 )
             });
@@ -879,8 +892,8 @@ fn server_settings(
         let mut private = s.private;
         if widgets::check_row(
             ui,
-            "Servidor privado",
-            "Quem tiver um convite pede para entrar, e quem pode expulsar membros aceita ou recusa",
+            t!("modal.private_server"),
+            t!("modal.private_server_hint"),
             &mut private,
             true,
         ) {
@@ -889,8 +902,8 @@ fn server_settings(
     }
     if s.can(P_MANAGE_ROLES) && !s.roles.is_empty() {
         widgets::divider(ui);
-        widgets::h3(ui, "Cargos");
-        widgets::sub(ui, "Cargos definem o que cada membro pode fazer.");
+        widgets::h3(ui, t!("modal.roles_title"));
+        widgets::sub(ui, t!("modal.roles_sub"));
         ui.add_space(8.0);
         // The selected role, loaded into the editor when it changes.
         let wanted = editor
@@ -949,9 +962,9 @@ fn server_settings(
                     }
                 }
                 ui.add_space(8.0);
-                let r = widgets::input(ui, new_role, 100, false, "Novo cargo");
+                let r = widgets::input(ui, new_role, 100, false, t!("modal.new_role_placeholder"));
                 let busy = core.busy.contains(&FormId::CreateRole);
-                if (Button::ghost("Criar cargo")
+                if (Button::ghost(t!("modal.create_role_btn"))
                     .small()
                     .wide()
                     .enabled(!busy)
@@ -977,12 +990,12 @@ fn server_settings(
                 let Some(e) = editor.as_mut() else { return };
                 let Some(role) = s.role(e.id) else { return };
                 if role.is_everyone() {
-                    widgets::sub(ui, "Permissões padrão de todos os membros.");
+                    widgets::sub(ui, t!("modal.everyone_perms"));
                     ui.add_space(6.0);
                 } else {
-                    widgets::field(ui, "Nome do cargo", &mut e.name, 100, false);
+                    widgets::field(ui, t!("modal.role_name"), &mut e.name, 100, false);
                     ui.label(
-                        egui::RichText::new("COR")
+                        egui::RichText::new(t!("modal.color_label"))
                             .font(theme::bold(12.0))
                             .color(MUTED)
                             .extra_letter_spacing(0.5),
@@ -1006,7 +1019,7 @@ fn server_settings(
                 let rid = e.id;
                 let everyone = role.is_everyone();
                 foot(ui, |ui| {
-                    if Button::primary("Salvar cargo")
+                    if Button::primary(t!("modal.save_role_btn"))
                         .enabled(!busy)
                         .show(ui)
                         .clicked()
@@ -1014,7 +1027,11 @@ fn server_settings(
                     {
                         acts.later(Core::save_role);
                     }
-                    if !everyone && Button::danger("Excluir cargo").show(ui).clicked() {
+                    if !everyone
+                        && Button::danger(t!("modal.delete_role_btn"))
+                            .show(ui)
+                            .clicked()
+                    {
                         acts.later(move |c| {
                             c.call(
                                 Req::delete(format!("/roles/{rid}")),
@@ -1029,10 +1046,10 @@ fn server_settings(
     }
     if s.can(P_BAN) {
         widgets::divider(ui);
-        widgets::h3(ui, "Banimentos");
+        widgets::h3(ui, t!("modal.bans_title"));
         ui.add_space(6.0);
         if s.bans.is_empty() {
-            widgets::sub(ui, "Ninguém foi banido.");
+            widgets::sub(ui, t!("modal.no_bans"));
         }
         for u in &s.bans {
             ui.horizontal(|ui| {
@@ -1052,7 +1069,7 @@ fn server_settings(
                     );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Button::ghost("Remover banimento")
+                    if Button::ghost(t!("modal.remove_ban_btn"))
                         .small()
                         .show(ui)
                         .clicked()
@@ -1074,18 +1091,18 @@ fn server_settings(
     let owner = s.owner_id == core.me_id();
     ui.add_space(18.0);
     ui.horizontal(|ui| {
-        if owner && Button::danger("Excluir servidor").show(ui).clicked() {
+        if owner && Button::danger(t!("modal.delete_server")).show(ui).clicked() {
             acts.later(move |c| {
                 c.confirm(
-                    "Excluir servidor",
-                    "Todos os canais e mensagens serão apagados para todo mundo. Isso não pode ser desfeito.",
-                    "Excluir servidor",
+                    t!("modal.delete_server"),
+                    t!("modal.delete_server_body"),
+                    t!("modal.delete_server"),
                     Action::DeleteServer(sid),
                 )
             });
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if Button::ghost("Fechar").show(ui).clicked() {
+            if Button::ghost(t!("common.close")).show(ui).clicked() {
                 acts.later(Core::close_modal);
             }
         });
@@ -1108,8 +1125,12 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
         ui.add_space(8.0);
         widgets::h3(ui, u.name());
         ui.label(
-            egui::RichText::new(format!("{} · {}", widgets::handle(&u), u.status.public().label()))
-                .color(MUTED),
+            egui::RichText::new(format!(
+                "{} · {}",
+                widgets::handle(&u),
+                u.status.public().label()
+            ))
+            .color(MUTED),
         );
         let roles: Vec<&Role> = match (s, member) {
             (Some(s), Some(m)) => s.roles.iter().filter(|r| m.roles.contains(&r.id)).collect(),
@@ -1127,21 +1148,25 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
         }
         if !me {
             if core.blocks.contains(&uid) {
-                widgets::sub(ui, "Você bloqueou essa pessoa.");
+                widgets::sub(ui, t!("modal.you_blocked"));
                 ui.add_space(6.0);
-                if Button::ghost("Desbloquear").show(ui).clicked() {
+                if Button::ghost(t!("modal.unblock_btn")).show(ui).clicked() {
                     acts.later(move |c| {
-                        c.call(Req::delete(format!("/blocks/{uid}")), Then::Nothing, ErrTo::Toast)
+                        c.call(
+                            Req::delete(format!("/blocks/{uid}")),
+                            Then::Nothing,
+                            ErrTo::Toast,
+                        )
                     });
                 }
             } else {
                 ui.horizontal(|ui| {
                     let n = if friend { 2.0 } else { 3.0 };
                     ui.add_space(((ui.available_width() - n * 120.0) / 2.0).max(0.0));
-                    if Button::primary("Mensagem").show(ui).clicked() {
+                    if Button::primary(t!("modal.message_btn")).show(ui).clicked() {
                         acts.later(move |c| c.open_dm(uid));
                     }
-                    if !friend && Button::ghost("Adicionar amigo").show(ui).clicked() {
+                    if !friend && Button::ghost(t!("modal.add_friend_btn")).show(ui).clicked() {
                         let name = u.username.clone();
                         acts.later(move |c| {
                             c.call(
@@ -1151,12 +1176,12 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
                             )
                         });
                     }
-                    if Button::ghost("Bloquear").show(ui).clicked() {
+                    if Button::ghost(t!("modal.block")).show(ui).clicked() {
                         acts.later(move |c| {
                             c.confirm(
-                                "Bloquear",
-                                "Você deixa de ver as mensagens dessa pessoa, a amizade é desfeita e nenhum dos dois consegue mandar mensagem direta ou pedido de amizade para o outro.",
-                                "Bloquear",
+                                t!("modal.block"),
+                                t!("modal.block_body"),
+                                t!("modal.block"),
                                 Action::Block(uid),
                             )
                         });
@@ -1166,9 +1191,9 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
             // The end-to-end encryption with them (ui/security.rs).
             ui.add_space(8.0);
             let label = match core.e2e.pin_view(uid) {
-                crate::e2e::PinView::Changed => "⚠ A chave de segurança mudou: conferir",
-                crate::e2e::PinView::Pinned { verified: true } => "🔒 Código de segurança (conferido)",
-                _ => "🔒 Código de segurança",
+                crate::e2e::PinView::Changed => t!("modal.e2e_key_changed"),
+                crate::e2e::PinView::Pinned { verified: true } => t!("modal.e2e_code_verified"),
+                _ => t!("modal.e2e_code"),
             };
             if widgets::link(ui, label).clicked() {
                 acts.later(move |c| super::security::open(c, uid));
@@ -1183,7 +1208,7 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
     if !me && s.can(P_MANAGE_ROLES) && !other_roles.is_empty() {
         widgets::divider(ui);
         ui.label(
-            egui::RichText::new("Cargos")
+            egui::RichText::new(t!("modal.roles_title"))
                 .font(theme::bold(14.0))
                 .color(TEXT),
         );
@@ -1214,16 +1239,9 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
     // ones, or an account the server added on its own): no keys for them.
     if !core.member_vouched(sid, uid) {
         widgets::divider(ui);
-        ui.label(
-            egui::RichText::new(
-                "Ninguém do servidor assinou a entrada desta pessoa (um convite antigo, ou uma \
-                 conta que o próprio servidor pôs aqui): ela não recebe as mensagens cifradas \
-                 novas. Confirme só se você sabe quem é.",
-            )
-            .color(WARN),
-        );
+        ui.label(egui::RichText::new(t!("modal.not_vouched")).color(WARN));
         if core.member_vouched(sid, core.me_id())
-            && Button::ghost("Confirmar que é membro")
+            && Button::ghost(t!("modal.confirm_member_btn"))
                 .small()
                 .show(ui)
                 .clicked()
@@ -1236,22 +1254,32 @@ fn profile(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
                 ui.add_space(((ui.available_width() - 180.0) / 2.0).max(0.0));
-                if s.can(P_KICK) && Button::danger("Expulsar").small().show(ui).clicked() {
+                if s.can(P_KICK)
+                    && Button::danger(t!("modal.kick_btn"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                {
                     acts.later(move |c| {
                         c.confirm(
-                            "Expulsar membro",
-                            "A pessoa sai do servidor, mas pode voltar com um convite.",
-                            "Expulsar",
+                            t!("modal.kick_title"),
+                            t!("modal.kick_body"),
+                            t!("modal.kick_btn"),
                             Action::Kick { sid, uid },
                         )
                     });
                 }
-                if s.can(P_BAN) && Button::danger("Banir").small().show(ui).clicked() {
+                if s.can(P_BAN)
+                    && Button::danger(t!("modal.ban_btn"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                {
                     acts.later(move |c| {
                         c.confirm(
-                            "Banir membro",
-                            "A pessoa sai do servidor e não consegue voltar, mesmo com convite.",
-                            "Banir",
+                            t!("modal.ban_title"),
+                            t!("modal.ban_body"),
+                            t!("modal.ban_btn"),
                             Action::Ban { sid, uid },
                         )
                     });
@@ -1557,16 +1585,19 @@ fn report(
     detail: &mut String,
     acts: &mut Acts,
 ) {
-    widgets::h3(ui, "Denunciar mensagem");
-    widgets::sub(
-        ui,
-        "A denúncia vai para a moderação deste servidor. Quem escreveu não fica sabendo quem denunciou.",
-    );
+    widgets::h3(ui, t!("modal.report_title"));
+    widgets::sub(ui, t!("modal.report_sub"));
     ui.add_space(12.0);
     let labels: Vec<&str> = REPORT_REASONS.iter().map(|(_, l)| *l).collect();
-    select(ui, "report-reason", "Motivo", reason, &labels);
+    select(
+        ui,
+        "report-reason",
+        t!("modal.reason_label"),
+        reason,
+        &labels,
+    );
     ui.label(
-        egui::RichText::new("DETALHES (OPCIONAL)")
+        egui::RichText::new(t!("modal.details_optional"))
             .font(theme::bold(12.0))
             .color(MUTED)
             .extra_letter_spacing(0.5),
@@ -1584,7 +1615,7 @@ fn report(
     let busy = core.busy.contains(&FormId::Report);
     let key = REPORT_REASONS.get(*reason).map_or("outro", |(k, _)| *k);
     foot(ui, |ui| {
-        if Button::danger("Enviar denúncia")
+        if Button::danger(t!("modal.send_report_btn"))
             .enabled(!busy)
             .show(ui)
             .clicked()
@@ -1594,12 +1625,12 @@ fn report(
             acts.later(move |c| {
                 c.call(
                     Req::post(format!("/messages/{mid}/report")).with(body),
-                    Then::CloseModalToast("Denúncia enviada para a moderação do servidor.".into()),
+                    Then::CloseModalToast(t!("modal.report_sent").into()),
                     ErrTo::Form(FormId::Report),
                 )
             });
         }
-        if Button::ghost("Cancelar").show(ui).clicked() {
+        if Button::ghost(t!("common.cancel")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -1610,12 +1641,12 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
         acts.later(Core::close_modal);
         return;
     };
-    widgets::h3(ui, "Denúncias");
+    widgets::h3(ui, t!("modal.reports_title"));
     let n = s.reports.len();
     let count = match n {
-        0 => "nenhuma pendente".to_owned(),
-        1 => "1 pendente".to_owned(),
-        n => format!("{n} pendentes"),
+        0 => t!("modal.reports_none_pending").to_owned(),
+        1 => t!("modal.reports_one_pending").to_owned(),
+        n => tf!("modal.reports_n_pending", n = n),
     };
     widgets::sub(ui, &format!("{} · {count}", s.name));
     ui.add_space(12.0);
@@ -1634,12 +1665,17 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
                     widgets::avatar(ui, core, &author, 30.0, false, BG1);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.label(egui::RichText::new(author.name()).font(theme::bold(14.0)).color(TEXT));
+                        ui.label(
+                            egui::RichText::new(author.name())
+                                .font(theme::bold(14.0))
+                                .color(TEXT),
+                        );
                         let place = r.channel.as_deref().unwrap_or("?");
                         ui.label(
-                            egui::RichText::new(format!(
-                                "em #{place} · {}",
-                                super::chat::fmt_time(r.message.created)
+                            egui::RichText::new(tf!(
+                                "modal.report_in_channel",
+                                channel = place,
+                                time = super::chat::fmt_time(r.message.created)
                             ))
                             .size(13.0)
                             .color(MUTED),
@@ -1651,11 +1687,19 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
                     ui.add_space(13.0);
                     ui.vertical(|ui| {
                         if r.message.content.is_empty() {
-                            ui.label(egui::RichText::new("anexo").italics().color(MUTED));
+                            ui.label(
+                                egui::RichText::new(t!("modal.attachment"))
+                                    .italics()
+                                    .color(MUTED),
+                            );
                         } else {
-                            let pieces = markdown::parse(&r.message.content, &|n| core.known_name(n));
-                            let named = |user: &str| core.user_named(user).map(|u| u.name().to_owned());
-                            if let Some(markdown::Click::Link(url)) = markdown::show(ui, &pieces, &|_| true, &named, false) {
+                            let pieces =
+                                markdown::parse(&r.message.content, &|n| core.known_name(n));
+                            let named =
+                                |user: &str| core.user_named(user).map(|u| u.name().to_owned());
+                            if let Some(markdown::Click::Link(url)) =
+                                markdown::show(ui, &pieces, &|_| true, &named, false)
+                            {
                                 super::chat::open_external(url);
                             }
                         }
@@ -1668,21 +1712,35 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
                     BG4,
                 );
                 ui.add_space(6.0);
-                let reporter = r.reporter.as_ref().map_or("Desconhecido", |u| u.name());
+                let reporter = r
+                    .reporter
+                    .as_ref()
+                    .map_or(t!("modal.unknown"), |u| u.name());
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.label(egui::RichText::new("Motivo:").color(MUTED));
-                    ui.label(egui::RichText::new(reason_label(&r.reason)).font(theme::bold(14.0)).color(MUTED));
-                    ui.label(egui::RichText::new(format!("· denunciado por {reporter}")).color(MUTED));
+                    ui.label(egui::RichText::new(t!("modal.reason_colon")).color(MUTED));
+                    ui.label(
+                        egui::RichText::new(reason_label(&r.reason))
+                            .font(theme::bold(14.0))
+                            .color(MUTED),
+                    );
+                    ui.label(
+                        egui::RichText::new(tf!("modal.reported_by", reporter = reporter))
+                            .color(MUTED),
+                    );
                 });
                 let (rid, mid, author_id) = (r.id, r.message.id, author.id);
                 foot(ui, |ui| {
-                    if Button::danger("Apagar mensagem").small().show(ui).clicked() {
+                    if Button::danger(t!("modal.delete_message_title"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         acts.later(move |c| {
                             c.confirm(
-                                "Apagar mensagem",
-                                "A mensagem denunciada será apagada para todo mundo.",
-                                "Apagar",
+                                t!("modal.delete_message_title"),
+                                t!("modal.delete_reported_body"),
+                                t!("modal.delete_btn"),
                                 Action::DeleteReported { sid, mid },
                             )
                         });
@@ -1690,20 +1748,34 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
                     if can_ban
                         && author_id != s.owner_id
                         && author_id != 0
-                        && Button::danger("Banir autor").small().show(ui).clicked()
+                        && Button::danger(t!("modal.ban_author"))
+                            .small()
+                            .show(ui)
+                            .clicked()
                     {
                         acts.later(move |c| {
                             c.confirm(
-                                "Banir autor",
-                                "A pessoa sai do servidor e não consegue voltar, mesmo com convite.",
-                                "Banir",
-                                Action::BanAuthor { sid, uid: author_id },
+                                t!("modal.ban_author"),
+                                t!("modal.ban_body"),
+                                t!("modal.ban_btn"),
+                                Action::BanAuthor {
+                                    sid,
+                                    uid: author_id,
+                                },
                             )
                         });
                     }
-                    if Button::ghost("Ignorar").small().show(ui).clicked() {
+                    if Button::ghost(t!("modal.ignore_btn"))
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         acts.later(move |c| {
-                            c.call(Req::delete(format!("/reports/{rid}")), Then::Nothing, ErrTo::Toast)
+                            c.call(
+                                Req::delete(format!("/reports/{rid}")),
+                                Then::Nothing,
+                                ErrTo::Toast,
+                            )
                         });
                     }
                 });
@@ -1711,7 +1783,7 @@ fn reports(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
         ui.add_space(10.0);
     }
     foot(ui, |ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -1723,11 +1795,11 @@ fn requests(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
         acts.later(Core::close_modal);
         return;
     };
-    widgets::h3(ui, "Pedidos de entrada");
+    widgets::h3(ui, t!("modal.join_requests_title"));
     let count = match s.requests.len() {
-        0 => "nenhum esperando".to_owned(),
-        1 => "1 esperando".to_owned(),
-        n => format!("{n} esperando"),
+        0 => t!("modal.requests_none_waiting").to_owned(),
+        1 => t!("modal.requests_one_waiting").to_owned(),
+        n => tf!("modal.requests_n_waiting", n = n),
     };
     widgets::sub(ui, &format!("{} · {count}", s.name));
     ui.add_space(12.0);
@@ -1735,9 +1807,9 @@ fn requests(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
         widgets::sub(
             ui,
             if s.private {
-                "Quando alguém usar um convite deste servidor, o pedido aparece aqui."
+                t!("modal.requests_empty_private")
             } else {
-                "O servidor está aberto: quem tem um convite entra direto."
+                t!("modal.requests_empty_public")
             },
         );
     }
@@ -1763,10 +1835,18 @@ fn requests(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let uid = r.user.id;
-                if Button::ghost("Recusar").small().show(ui).clicked() {
+                if Button::ghost(t!("modal.decline_btn"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     acts.later(move |c| c.deny_request(sid, uid));
                 }
-                if Button::primary("Aceitar").small().show(ui).clicked() {
+                if Button::primary(t!("modal.accept_btn"))
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
                     acts.later(move |c| c.accept_request(sid, uid));
                 }
             });
@@ -1774,7 +1854,7 @@ fn requests(ui: &mut Ui, core: &Core, sid: i64, acts: &mut Acts) {
         ui.add_space(6.0);
     }
     foot(ui, |ui| {
-        if Button::ghost("Fechar").show(ui).clicked() {
+        if Button::ghost(t!("common.close")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
     });
@@ -1822,18 +1902,21 @@ fn share(
     let window_count = items.iter().filter(|i| is_window(i)).count();
     let screen_count = items.len() - window_count;
 
-    widgets::h3(ui, "Compartilhar");
-    widgets::sub(
-        ui,
-        "Escolha uma tela inteira, só uma janela ou uma apresentação: quem está na chamada vê apenas o que você escolher.",
-    );
+    widgets::h3(ui, t!("modal.share_title"));
+    widgets::sub(ui, t!("modal.share_sub"));
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         for (text, which) in [
-            (format!("Telas ({screen_count})"), ShareTab::Screens),
-            (format!("Janelas ({window_count})"), ShareTab::Windows),
-            ("Apresentação".to_owned(), ShareTab::Slides),
+            (
+                tf!("modal.share_screens", n = screen_count),
+                ShareTab::Screens,
+            ),
+            (
+                tf!("modal.share_windows", n = window_count),
+                ShareTab::Windows,
+            ),
+            (t!("modal.share_slides").to_owned(), ShareTab::Slides),
         ] {
             let button = if *tab == which {
                 Button::primary(&text)
@@ -1858,18 +1941,24 @@ fn share(
         .position(|q| q.key == core.quality_key())
         .unwrap_or(1);
     let labels: Vec<&str> = QUALITIES.iter().map(|q| q.label).collect();
-    if select(ui, "share-quality", "Qualidade", &mut q, &labels) {
+    if select(
+        ui,
+        "share-quality",
+        t!("modal.quality_label"),
+        &mut q,
+        &labels,
+    ) {
         let key = QUALITIES[q].key;
         acts.later(move |c| c.set_quality(key));
     }
     // The PC's sound along with the picture (for a window, its program's).
     let mut audio = core.voice.share_audio();
     let hint = if windows {
-        "Vai junto o som do programa da janela."
+        t!("modal.share_audio_window")
     } else {
-        "Vai junto o som do PC, menos o do Babu Tela."
+        t!("modal.share_audio_pc")
     };
-    if widgets::check_row(ui, "Compartilhar o áudio", hint, &mut audio, true) {
+    if widgets::check_row(ui, t!("modal.share_audio_label"), hint, &mut audio, true) {
         acts.later(move |c| c.set_share_audio(audio));
     }
     ui.add_space(8.0);
@@ -1881,13 +1970,11 @@ fn share(
         ui.horizontal(|ui| {
             if loading {
                 ui.add(egui::Spinner::new().size(16.0));
-                ui.label(egui::RichText::new("Procurando…").color(MUTED));
+                ui.label(egui::RichText::new(t!("modal.searching")).color(MUTED));
             } else if windows {
-                ui.label(
-                    egui::RichText::new("Nenhuma janela aberta para compartilhar.").color(MUTED),
-                );
+                ui.label(egui::RichText::new(t!("modal.no_windows")).color(MUTED));
             } else {
-                ui.label(egui::RichText::new("Nenhuma tela encontrada.").color(MUTED));
+                ui.label(egui::RichText::new(t!("modal.no_screens")).color(MUTED));
             }
         });
     }
@@ -1907,18 +1994,20 @@ fn share(
         ui.horizontal(|ui| {
             ui.add(egui::Spinner::new().size(14.0));
             ui.label(
-                egui::RichText::new("Procurando mais…")
+                egui::RichText::new(t!("modal.searching_more"))
                     .font(theme::small())
                     .color(FAINT),
             );
         });
     }
     foot(ui, |ui| {
-        if Button::ghost("Cancelar").show(ui).clicked() {
+        if Button::ghost(t!("common.cancel")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
         if matches!(current, Some(Source::Monitor(_) | Source::Window(_)))
-            && Button::danger("Parar de compartilhar").show(ui).clicked()
+            && Button::danger(t!("modal.stop_sharing_btn"))
+                .show(ui)
+                .clicked()
         {
             acts.later(|c| {
                 c.close_modal();
@@ -1931,46 +2020,40 @@ fn share(
 /// The picker's presentation tab: a .pptx or a PDF, drawn on this PC and
 /// sent to everyone as pictures (slides/).
 fn present(ui: &mut Ui, core: &Core, acts: &mut Acts) {
-    ui.label(
-        egui::RichText::new(
-            "Apresente um arquivo do PowerPoint (.pptx) ou um PDF. O Babu Tela desenha os \
-             slides no seu PC e manda as imagens para quem está na chamada: ninguém precisa \
-             ter o PowerPoint, e cada slide aparece nítido, sem vídeo.",
-        )
-        .color(TEXT),
-    );
+    ui.label(egui::RichText::new(t!("modal.present_body1")).color(TEXT));
     ui.add_space(8.0);
     ui.label(
-        egui::RichText::new(
-            "Você vê o próximo slide e as suas anotações; só você vê as anotações. \
-             Animações e transições não vão: cada slide aparece já completo.",
-        )
-        .font(theme::small())
-        .color(MUTED),
+        egui::RichText::new(t!("modal.present_body2"))
+            .font(theme::small())
+            .color(MUTED),
     );
     ui.add_space(14.0);
     let presenting = core.voice.slides().mine();
     if let Some(mine) = &presenting {
         ui.label(
-            egui::RichText::new(format!("Você está apresentando {}.", mine.name))
+            egui::RichText::new(tf!("modal.presenting_file", name = mine.name))
                 .font(theme::bold(13.0))
                 .color(ACCENT),
         );
         ui.add_space(8.0);
     }
     let label = if presenting.is_some() {
-        "Apresentar outro arquivo…"
+        t!("modal.present_another")
     } else {
-        "Escolher o arquivo…"
+        t!("modal.choose_file")
     };
     if Button::primary(label).show(ui).clicked() {
         acts.later(|c| c.pick_files(crate::core::Pick::Slides));
     }
     foot(ui, |ui| {
-        if Button::ghost("Cancelar").show(ui).clicked() {
+        if Button::ghost(t!("common.cancel")).show(ui).clicked() {
             acts.later(Core::close_modal);
         }
-        if presenting.is_some() && Button::danger("Parar de apresentar").show(ui).clicked() {
+        if presenting.is_some()
+            && Button::danger(t!("modal.stop_presenting_btn"))
+                .show(ui)
+                .clicked()
+        {
             acts.later(|c| {
                 c.close_modal();
                 c.voice.stop_presenting();
@@ -2166,7 +2249,7 @@ fn person_menu(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
     let set = move |acts: &mut Acts, audio: crate::prefs::PersonAudio, keep: bool| {
         acts.later(move |c| c.set_person_audio(uid, audio, keep));
     };
-    if menu_check(ui, "Silenciar", audio.voice_muted) {
+    if menu_check(ui, t!("modal.mute"), audio.voice_muted) {
         set(
             acts,
             crate::prefs::PersonAudio {
@@ -2176,7 +2259,7 @@ fn person_menu(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
             true,
         );
     }
-    if let Some((voice, done)) = volume(ui, "Volume", audio.voice, audio.voice_muted) {
+    if let Some((voice, done)) = volume(ui, t!("modal.volume"), audio.voice, audio.voice_muted) {
         set(
             acts,
             crate::prefs::PersonAudio {
@@ -2192,7 +2275,7 @@ fn person_menu(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
         let (line, _) = ui.allocate_exact_size(vec2(PERSON_W, 1.0), Sense::hover());
         ui.painter()
             .hline(line.x_range(), line.center().y, Stroke::new(1.0, BG4));
-        if menu_check(ui, "Silenciar transmissão", audio.screen_muted) {
+        if menu_check(ui, t!("modal.mute_stream"), audio.screen_muted) {
             set(
                 acts,
                 crate::prefs::PersonAudio {
@@ -2204,7 +2287,7 @@ fn person_menu(ui: &mut Ui, core: &Core, uid: i64, acts: &mut Acts) {
         }
         if let Some((screen, done)) = volume(
             ui,
-            "Volume da transmissão",
+            t!("modal.volume_stream"),
             audio.screen,
             audio.screen_muted,
         ) {
@@ -2356,13 +2439,13 @@ fn server_menu(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     let mut any = false;
     if s.can(P_INVITE) {
         any = true;
-        if menu_item(ui, "Convidar pessoas", false) {
+        if menu_item(ui, t!("modal.invite_title"), false) {
             acts.later(Core::invite);
         }
     }
     if s.can(P_MANAGE_CHANNELS) {
         any = true;
-        if menu_item(ui, "Criar canal", false) {
+        if menu_item(ui, t!("modal.create_channel"), false) {
             acts.later(move |c| {
                 c.open_modal(Modal::NewChannel {
                     sid,
@@ -2376,16 +2459,16 @@ fn server_menu(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     }
     if s.can(P_MANAGE_SERVER) || s.can(P_MANAGE_ROLES) || s.can(P_BAN) {
         any = true;
-        if menu_item(ui, "Configurações do servidor", false) {
+        if menu_item(ui, t!("modal.server_settings_title"), false) {
             acts.later(move |c| c.open_server_settings(sid));
         }
     }
     if s.can(P_MANAGE_MESSAGES) {
         any = true;
         let label = if s.reports.is_empty() {
-            "Denúncias".to_owned()
+            t!("modal.reports_title").to_owned()
         } else {
-            format!("Denúncias ({})", s.reports.len())
+            tf!("modal.reports_count", n = s.reports.len())
         };
         if menu_item(ui, &label, false) {
             acts.later(move |c| c.open_modal(Modal::Reports { sid }));
@@ -2394,9 +2477,9 @@ fn server_menu(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     if s.can(P_KICK) && (s.private || !s.requests.is_empty()) {
         any = true;
         let label = if s.requests.is_empty() {
-            "Pedidos de entrada".to_owned()
+            t!("modal.join_requests_title").to_owned()
         } else {
-            format!("Pedidos de entrada ({})", s.requests.len())
+            tf!("modal.join_requests_count", n = s.requests.len())
         };
         if menu_item(ui, &label, false) {
             acts.later(move |c| c.open_modal(Modal::Requests { sid }));
@@ -2405,17 +2488,22 @@ fn server_menu(ui: &mut Ui, core: &Core, acts: &mut Acts) {
     if s.owner_id != core.me_id() {
         any = true;
         let back = if s.private {
-            "Para voltar, você vai precisar de um novo convite e de que aceitem seu pedido."
+            t!("modal.leave_server_body_private")
         } else {
-            "Você só volta com um novo convite."
+            t!("modal.leave_server_body_public")
         };
-        if menu_item(ui, "Sair do servidor", true) {
+        if menu_item(ui, t!("modal.leave_server_title"), true) {
             acts.later(move |c| {
-                c.confirm("Sair do servidor", back, "Sair", Action::LeaveServer(sid))
+                c.confirm(
+                    t!("modal.leave_server_title"),
+                    back,
+                    t!("modal.leave_btn"),
+                    Action::LeaveServer(sid),
+                )
             });
         }
     }
-    if !any && menu_item(ui, "Nada disponível", false) {
+    if !any && menu_item(ui, t!("modal.nothing_available"), false) {
         acts.later(|c| c.pop = None);
     }
 }
@@ -2443,7 +2531,6 @@ const EMOJI_H: f32 = 36.0 + EMOJI_TAB + EMOJI_GRID_H + EMOJI_FOOT + 3.0 * 6.0;
 const TONE_HAND: &str = "\u{270B}";
 /// The recent ones' tab.
 const RECENT_ICON: &str = "\u{1F558}";
-const RECENT_LABEL: &str = "Usados recentemente";
 
 /// One emoji of the picker in its cell, lit under the pointer and when it
 /// is the one chosen.
@@ -2503,7 +2590,7 @@ fn emoji_picker(
     };
     let tone_name = |t: u8| -> String {
         match (t, catalog.as_ref()) {
-            (0, _) => "Sem tom de pele".to_owned(),
+            (0, _) => t!("modal.no_skin_tone").to_owned(),
             (t, Some(c)) => c.tone_names[usize::from(t - 1)].clone(),
             (t, None) => crate::emoji::TONE_NAMES[usize::from(t - 1)].to_owned(),
         }
@@ -2519,7 +2606,7 @@ fn emoji_picker(
                 ui.add(
                     TextEdit::singleline(&mut core.emoji_query)
                         .char_limit(60)
-                        .hint_text(egui::RichText::new("Buscar emoji").color(FAINT))
+                        .hint_text(egui::RichText::new(t!("modal.search_emoji")).color(FAINT))
                         .desired_width(f32::INFINITY)
                         .font(theme::body())
                         .margin(Margin::symmetric(12, 9))
@@ -2543,7 +2630,7 @@ fn emoji_picker(
         let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
         let resp = resp
             .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text("Tom de pele");
+            .on_hover_text(t!("modal.skin_tone"));
         crate::smoke::target(|| "emoji-tons".into(), rect);
         if resp.hovered() || core.emoji_tones_open {
             ui.painter()
@@ -2569,7 +2656,7 @@ fn emoji_picker(
     let mut tabs: Vec<(String, String, usize)> = Vec::new();
     let mut sections: Vec<EmojiSection> = Vec::new();
     if !recent.is_empty() {
-        tabs.push((RECENT_ICON.into(), RECENT_LABEL.into(), 0));
+        tabs.push((RECENT_ICON.into(), t!("modal.recent_emoji").into(), 0));
     }
     if let Some(c) = &catalog {
         let first = usize::from(!recent.is_empty());
@@ -2587,7 +2674,7 @@ fn emoji_picker(
     } else {
         if !recent.is_empty() {
             sections.push(EmojiSection {
-                label: RECENT_LABEL,
+                label: t!("modal.recent_emoji"),
                 items: recent.iter().map(String::as_str).collect(),
             });
         }
@@ -2696,7 +2783,7 @@ fn emoji_picker(
         ui.painter().text(
             pos2(head.left() + 6.0, head.center().y),
             egui::Align2::LEFT_CENTER,
-            "UM TOM PARA CADA PESSOA",
+            t!("modal.tone_per_person_heading"),
             theme::bold(11.0),
             FAINT,
         );
@@ -2705,7 +2792,7 @@ fn emoji_picker(
                 .max_rect(head.shrink2(vec2(8.0, 0.0)))
                 .layout(Layout::right_to_left(Align::Center)),
         );
-        let resp = widgets::link(&mut back, "Voltar");
+        let resp = widgets::link(&mut back, t!("modal.back"));
         crate::smoke::target(|| "emoji-voltar".into(), resp.rect);
         if resp.clicked() {
             acts.later(|c| c.emoji_pairs = None);
@@ -2755,7 +2842,7 @@ fn emoji_picker(
         ui.painter().text(
             pos2(cell.right() + 8.0, cell.center().y),
             egui::Align2::LEFT_CENTER,
-            "Sem tom de pele",
+            t!("modal.no_skin_tone"),
             theme::small(),
             MUTED,
         );
@@ -2767,13 +2854,10 @@ fn emoji_picker(
         }
     } else if sections.iter().all(|s| s.items.is_empty()) {
         let text = match &now {
-            _ if searching => format!("Nenhum emoji encontrado para “{query}”."),
+            _ if searching => tf!("modal.no_emoji_found", query = query),
             // What went wrong is in the log; here, what to do.
-            Now::Failed(_) => {
-                "Não deu para baixar a lista de emoji. Confira a internet e tente de novo."
-                    .to_owned()
-            }
-            _ => "Carregando os emoji…".to_owned(),
+            Now::Failed(_) => t!("modal.emoji_download_failed").to_owned(),
+            _ => t!("modal.loading_emoji").to_owned(),
         };
         let (rect, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), EMOJI_GRID_H), Sense::hover());
@@ -2847,7 +2931,7 @@ fn emoji_picker(
                             .and_then(|c| c.entry_of(item))
                             .filter(|e| e.pairs.is_some());
                         let resp = match two {
-                            Some(_) => resp.on_hover_text("Botão direito: um tom para cada pessoa"),
+                            Some(_) => resp.on_hover_text(t!("modal.right_click_tones")),
                             None => resp,
                         };
                         if resp.hovered() {
@@ -2885,24 +2969,24 @@ fn emoji_picker(
             }
             (None, Now::Failed(_)) => {
                 ui.label(
-                    egui::RichText::new("A lista completa não carregou.")
+                    egui::RichText::new(t!("modal.emoji_list_failed"))
                         .size(12.0)
                         .color(DANGER),
                 );
-                if widgets::link(ui, "Tentar de novo").clicked() {
+                if widgets::link(ui, t!("modal.try_again")).clicked() {
                     acts.later(|c| c.emoji.want());
                 }
             }
             (None, Now::Loading) => {
                 ui.label(
-                    egui::RichText::new("Carregando a lista de emoji…")
+                    egui::RichText::new(t!("modal.loading_emoji_list"))
                         .size(12.0)
                         .color(FAINT),
                 );
             }
             (None, Now::Ready(c)) => {
                 ui.label(
-                    egui::RichText::new(format!("Emoji {} · lista oficial do Unicode", c.version))
+                    egui::RichText::new(tf!("modal.emoji_version", version = c.version))
                         .size(12.0)
                         .color(FAINT),
                 );
@@ -2955,7 +3039,7 @@ fn sticker_picker(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let edit = ui.add(
         TextEdit::singleline(&mut core.sticker_query)
             .char_limit(giphy::MAX_QUERY)
-            .hint_text(egui::RichText::new("Buscar figurinhas no GIPHY").color(FAINT))
+            .hint_text(egui::RichText::new(t!("modal.search_stickers")).color(FAINT))
             .desired_width(f32::INFINITY)
             .font(theme::body())
             .margin(Margin::symmetric(12, 9))
@@ -2990,8 +3074,8 @@ fn sticker_picker(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         for (tab, label) in [
-            (StickerTab::Trending, "Em alta"),
-            (StickerTab::Favorites, "Favoritas"),
+            (StickerTab::Trending, t!("modal.trending")),
+            (StickerTab::Favorites, t!("modal.favorites")),
         ] {
             if picker_tab(ui, label, !searching && core.sticker_tab == tab) {
                 acts.later(move |c| {
@@ -3030,17 +3114,15 @@ fn sticker_picker(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
     let rows = view.ids.len().div_ceil(STICKER_COLS);
     if rows == 0 {
         let text = if view.loading {
-            "Carregando…".to_owned()
+            t!("modal.loading").to_owned()
         } else if let Some(e) = &view.error {
             e.clone()
         } else if feed.is_none() {
-            "Nenhuma favorita ainda. Passe o mouse numa figurinha e clique na estrela para \
-             guardá-la aqui."
-                .to_owned()
+            t!("modal.no_favorites").to_owned()
         } else if searching {
-            format!("Nenhuma figurinha encontrada para “{query}”.")
+            tf!("modal.no_stickers_found", query = query)
         } else {
-            "Nada em alta agora.".to_owned()
+            t!("modal.nothing_trending").to_owned()
         };
         let (rect, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), STICKER_GRID_H), Sense::hover());
@@ -3102,12 +3184,16 @@ fn sticker_picker(ui: &mut Ui, core: &mut Core, acts: &mut Acts) {
             if rows > 0 {
                 ui.label(egui::RichText::new(e).size(12.0).color(DANGER));
             }
-            if widgets::link(ui, "Tentar de novo").clicked() {
+            if widgets::link(ui, t!("modal.try_again")).clicked() {
                 let q = q.clone();
                 acts.later(move |c| c.giphy.retry(&q));
             }
         } else if view.loading && rows > 0 {
-            ui.label(egui::RichText::new("Carregando…").size(12.0).color(FAINT));
+            ui.label(
+                egui::RichText::new(t!("modal.loading"))
+                    .size(12.0)
+                    .color(FAINT),
+            );
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // GIPHY's terms: its words and its logo wherever its search is.
@@ -3163,7 +3249,7 @@ fn sticker_tile(ui: &mut Ui, core: &Core, id: &str, cell: Rect, acts: &mut Acts)
                     ui.painter().text(
                         cell.center(),
                         egui::Align2::CENTER_CENTER,
-                        "Indisponível",
+                        t!("modal.unavailable"),
                         theme::tiny(),
                         FAINT,
                     );
@@ -3182,7 +3268,7 @@ fn sticker_tile(ui: &mut Ui, core: &Core, id: &str, cell: Rect, acts: &mut Acts)
             ui.painter().text(
                 cell.center(),
                 egui::Align2::CENTER_CENTER,
-                "Não carregou",
+                t!("modal.failed_to_load"),
                 theme::tiny(),
                 FAINT,
             );
@@ -3191,7 +3277,7 @@ fn sticker_tile(ui: &mut Ui, core: &Core, id: &str, cell: Rect, acts: &mut Acts)
             ui.painter().text(
                 cell.center(),
                 egui::Align2::CENTER_CENTER,
-                "Indisponível",
+                t!("modal.unavailable"),
                 theme::tiny(),
                 FAINT,
             );
