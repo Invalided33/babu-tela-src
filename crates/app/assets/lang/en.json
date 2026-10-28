@@ -507,5 +507,32 @@
   "modal.no_stickers_found": "No sticker found for “{query}”.",
   "modal.nothing_trending": "Nothing trending right now.",
   "modal.unavailable": "Unavailable",
-  "modal.failed_to_load": "Didn't load"
+  "modal.failed_to_load": "Didn't load",
+
+  "perm.admin": "Administrator",
+  "perm.admin_desc": "Grants all permissions",
+  "perm.manage_server": "Manage server",
+  "perm.manage_server_desc": "Rename the server",
+  "perm.manage_channels": "Manage channels",
+  "perm.manage_channels_desc": "Create, edit and delete channels",
+  "perm.manage_roles": "Manage roles",
+  "perm.manage_roles_desc": "Create roles and assign them to members",
+  "perm.manage_messages": "Manage messages",
+  "perm.manage_messages_desc": "Delete other people's messages",
+  "perm.kick": "Kick members",
+  "perm.kick_desc": "And accept or decline join requests for a private server",
+  "perm.ban": "Ban members",
+  "perm.invite": "Create invites",
+  "perm.view": "View channels",
+  "perm.send": "Send messages",
+  "perm.attach": "Attach files",
+  "perm.connect": "Connect to voice channels",
+
+  "report.spam": "Spam",
+  "report.harassment": "Harassment or hate",
+  "report.inappropriate": "Inappropriate content",
+  "report.other": "Other reason",
+
+  "model.unknown_user": "User",
+  "model.channels_default": "Channels"
 }

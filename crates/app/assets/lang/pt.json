@@ -507,5 +507,32 @@
   "modal.no_stickers_found": "Nenhuma figurinha encontrada para “{query}”.",
   "modal.nothing_trending": "Nada em alta agora.",
   "modal.unavailable": "Indisponível",
-  "modal.failed_to_load": "Não carregou"
+  "modal.failed_to_load": "Não carregou",
+
+  "perm.admin": "Administrador",
+  "perm.admin_desc": "Concede todas as permissões",
+  "perm.manage_server": "Gerenciar servidor",
+  "perm.manage_server_desc": "Renomear o servidor",
+  "perm.manage_channels": "Gerenciar canais",
+  "perm.manage_channels_desc": "Criar, editar e excluir canais",
+  "perm.manage_roles": "Gerenciar cargos",
+  "perm.manage_roles_desc": "Criar cargos e atribuí-los a membros",
+  "perm.manage_messages": "Gerenciar mensagens",
+  "perm.manage_messages_desc": "Apagar mensagens de outras pessoas",
+  "perm.kick": "Expulsar membros",
+  "perm.kick_desc": "E aceitar ou recusar os pedidos de entrada de um servidor privado",
+  "perm.ban": "Banir membros",
+  "perm.invite": "Criar convites",
+  "perm.view": "Ver canais",
+  "perm.send": "Enviar mensagens",
+  "perm.attach": "Anexar arquivos",
+  "perm.connect": "Conectar aos canais de voz",
+
+  "report.spam": "Spam",
+  "report.harassment": "Assédio ou ódio",
+  "report.inappropriate": "Conteúdo impróprio",
+  "report.other": "Outro motivo",
+
+  "model.unknown_user": "Usuário",
+  "model.channels_default": "Canais"
 }

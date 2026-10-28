@@ -24,36 +24,39 @@ pub const P_CONNECT: i64 = 1024;
 pub const P_MANAGE_SERVER: i64 = 2048;
 
 /// Bit, name and explanation, in the order the role editor lists them.
-pub const PERM_LABELS: &[(i64, &str, &str)] = &[
-    (P_ADMIN, "Administrador", "Concede todas as permissões"),
-    (P_MANAGE_SERVER, "Gerenciar servidor", "Renomear o servidor"),
-    (
-        P_MANAGE_CHANNELS,
-        "Gerenciar canais",
-        "Criar, editar e excluir canais",
-    ),
-    (
-        P_MANAGE_ROLES,
-        "Gerenciar cargos",
-        "Criar cargos e atribuí-los a membros",
-    ),
-    (
-        P_MANAGE_MESSAGES,
-        "Gerenciar mensagens",
-        "Apagar mensagens de outras pessoas",
-    ),
-    (
-        P_KICK,
-        "Expulsar membros",
-        "E aceitar ou recusar os pedidos de entrada de um servidor privado",
-    ),
-    (P_BAN, "Banir membros", ""),
-    (P_INVITE, "Criar convites", ""),
-    (P_VIEW, "Ver canais", ""),
-    (P_SEND, "Enviar mensagens", ""),
-    (P_ATTACH, "Anexar arquivos", ""),
-    (P_CONNECT, "Conectar aos canais de voz", ""),
-];
+pub fn perm_labels() -> [(i64, &'static str, &'static str); 12] {
+    use crate::t;
+    [
+        (P_ADMIN, t!("perm.admin"), t!("perm.admin_desc")),
+        (
+            P_MANAGE_SERVER,
+            t!("perm.manage_server"),
+            t!("perm.manage_server_desc"),
+        ),
+        (
+            P_MANAGE_CHANNELS,
+            t!("perm.manage_channels"),
+            t!("perm.manage_channels_desc"),
+        ),
+        (
+            P_MANAGE_ROLES,
+            t!("perm.manage_roles"),
+            t!("perm.manage_roles_desc"),
+        ),
+        (
+            P_MANAGE_MESSAGES,
+            t!("perm.manage_messages"),
+            t!("perm.manage_messages_desc"),
+        ),
+        (P_KICK, t!("perm.kick"), t!("perm.kick_desc")),
+        (P_BAN, t!("perm.ban"), ""),
+        (P_INVITE, t!("perm.invite"), ""),
+        (P_VIEW, t!("perm.view"), ""),
+        (P_SEND, t!("perm.send"), ""),
+        (P_ATTACH, t!("perm.attach"), ""),
+        (P_CONNECT, t!("perm.connect"), ""),
+    ]
+}
 
 // ---------------------------------------------------------------- enums
 // All of these accept anything: a value the app does not know becomes the
@@ -272,7 +275,7 @@ impl User {
         User {
             id,
             username: "?".into(),
-            display_name: "Usuário".into(),
+            display_name: crate::t!("model.unknown_user").into(),
             ..Default::default()
         }
     }
@@ -283,7 +286,7 @@ impl User {
         } else if !self.username.is_empty() {
             &self.username
         } else {
-            "Desconhecido"
+            crate::t!("chat.unknown")
         }
     }
 
@@ -378,7 +381,7 @@ impl Channel {
     pub fn category_name(&self) -> &str {
         match self.category.as_deref() {
             Some(c) if !c.is_empty() => c,
-            _ => "Canais",
+            _ => crate::t!("model.channels_default"),
         }
     }
 
@@ -690,19 +693,22 @@ pub struct Report {
 }
 
 /// The reasons a message can be reported for, as the dialog lists them.
-pub const REPORT_REASONS: &[(&str, &str)] = &[
-    ("spam", "Spam"),
-    ("assedio", "Assédio ou ódio"),
-    ("improprio", "Conteúdo impróprio"),
-    ("outro", "Outro motivo"),
-];
+pub fn report_reasons() -> [(&'static str, &'static str); 4] {
+    use crate::t;
+    [
+        ("spam", t!("report.spam")),
+        ("assedio", t!("report.harassment")),
+        ("improprio", t!("report.inappropriate")),
+        ("outro", t!("report.other")),
+    ]
+}
 
 /// Turns a stored reason back into its label.
 pub fn reason_label(reason: &str) -> &str {
-    REPORT_REASONS
-        .iter()
+    report_reasons()
+        .into_iter()
         .find(|(k, _)| *k == reason)
-        .map_or(reason, |(_, l)| *l)
+        .map_or(reason, |(_, l)| l)
 }
 
 // ---------------------------------------------------------------- top level

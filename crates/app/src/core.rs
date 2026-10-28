@@ -3304,7 +3304,7 @@ impl Core {
             return;
         };
         let mut perms = role.perms & !s.perms;
-        for &(bit, _, _) in PERM_LABELS {
+        for (bit, _, _) in perm_labels() {
             if editor.perms & bit != 0 && s.perms & bit != 0 {
                 perms |= bit;
             }

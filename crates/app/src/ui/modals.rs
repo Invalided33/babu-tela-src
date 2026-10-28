@@ -1003,7 +1003,7 @@ fn server_settings(
                     egui::color_picker::color_edit_button_srgb(ui, &mut e.color);
                     ui.add_space(10.0);
                 }
-                for &(bit, label, hint) in PERM_LABELS {
+                for (bit, label, hint) in perm_labels() {
                     let mut on = e.perms & bit != 0;
                     let grantable = s.perms & bit != 0;
                     if widgets::check_row(ui, label, hint, &mut on, grantable) {
@@ -1588,7 +1588,8 @@ fn report(
     widgets::h3(ui, t!("modal.report_title"));
     widgets::sub(ui, t!("modal.report_sub"));
     ui.add_space(12.0);
-    let labels: Vec<&str> = REPORT_REASONS.iter().map(|(_, l)| *l).collect();
+    let reasons = report_reasons();
+    let labels: Vec<&str> = reasons.iter().map(|(_, l)| *l).collect();
     select(
         ui,
         "report-reason",
@@ -1613,7 +1614,7 @@ fn report(
     );
     widgets::error_line(ui, core.errors.get(&FormId::Report));
     let busy = core.busy.contains(&FormId::Report);
-    let key = REPORT_REASONS.get(*reason).map_or("outro", |(k, _)| *k);
+    let key = reasons.get(*reason).map_or("outro", |(k, _)| *k);
     foot(ui, |ui| {
         if Button::danger(t!("modal.send_report_btn"))
             .enabled(!busy)
