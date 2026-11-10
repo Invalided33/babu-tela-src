@@ -933,9 +933,16 @@ fn files(s: &Setup, out: &mut Numbers) -> Result {
 
     let path = dir.join("medida.bin");
     std::fs::write(&path, &data)?;
+    // After the upload, out of the measured part, the app downloads the
+    // file back with "Baixar", to `back`. The server keeps it sealed (E2E),
+    // so only an app can open it and say whether the parts that went up
+    // together still make the same file.
+    let back = dir.join("medida-volta.bin");
     let steps = format!(
-        "{LEFT}|go:first-server|attach:{}|mark:ini|send:|wait-sent:600|mark:fim",
-        path.display()
+        "{LEFT}|go:first-server|attach:{}|mark:ini|send:|wait-sent:600|mark:fim\
+         |salvar:0:{}|wait-salvo:600",
+        path.display(),
+        back.display()
     );
     let limit = 700;
     let mut copies = vec![launch(
@@ -949,27 +956,30 @@ fn files(s: &Setup, out: &mut Numbers) -> Result {
         limit,
     )?];
     let reports = finish(&mut copies, &dir, limit)?;
+    // The parts went up together: what the app got back and opened must
+    // be the same file, byte for byte.
+    let intact = std::fs::read(&back).is_ok_and(|got| got == data);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&back);
     match find(&reports[0], "ini:arquivo.envio").and_then(|v| v["p50"].as_f64()) {
         Some(ms) => {
             let rate = mb / (ms / 1000.0);
-            // The parts went up together: the file must still be the same,
-            // byte for byte.
-            let url = reports[0]["newest"]["attachments"][0]["url"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            let intact = !url.is_empty() && block_on(t.holds(&url, &data))??;
             println!(
                 "    pelo app: envio {rate:.1} MB/s ({:.1} s), {}",
                 ms / 1000.0,
                 if intact {
-                    "o arquivo voltou igual"
+                    "e o app baixou e decifrou o mesmo arquivo"
                 } else {
                     "O ARQUIVO NÃO VOLTOU IGUAL"
                 }
             );
             if !intact {
-                fail!("o arquivo enviado pelo app não voltou igual");
+                fail!(
+                    "o arquivo que o app enviou não voltou igual ao baixar pelo app \
+                     (downloads: {}; avisos: {})",
+                    reports[0]["saves"],
+                    reports[0]["toasts"]
+                );
             }
             out.insert("arquivos.app.envio_mb_s".into(), rate);
         }
@@ -979,7 +989,6 @@ fn files(s: &Setup, out: &mut Numbers) -> Result {
         ),
     }
     usage_lines(out, "arquivos", &copies, &reports, &[("ini", "fim")]);
-    let _ = std::fs::remove_file(&path);
     Ok(())
 }
 

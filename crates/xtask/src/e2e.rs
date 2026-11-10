@@ -2340,12 +2340,6 @@ impl T {
         Ok([sent, first, started.elapsed().as_secs_f64()])
     }
 
-    /// Whether the file at `url` is exactly `data` (what an app sent).
-    pub(crate) async fn holds(&self, url: &str, data: &[u8]) -> Result<bool> {
-        let got = self.download(url, None).await?.bytes().await?;
-        Ok(got.as_ref() == data)
-    }
-
     /// The same file the way the app sends and fetches it now: `at_once`
     /// parts going up together, and back down in as many pieces (8 MiB
     /// ranges) together; then the whole of it once more, from the start.
