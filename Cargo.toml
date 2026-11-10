@@ -14,7 +14,7 @@ exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-
 
 # The version lives only here: the app, the server and the installer read it.
 [workspace.package]
-version = "0.14.1"
+version = "0.14.2"
 edition = "2024"
 authors = ["Babu Tela"]
 publish = false
@@ -258,6 +258,13 @@ debug-assertions = false
 overflow-checks = false
 [profile.dev.package.tract-core]
 opt-level = 3
+
+# OpenH264's assembly goes through NASM, which a debug build asks for debug
+# information (-g); NASM 3 crashes on several of its files then, and the
+# build links without them (unresolved DeblockLuma..., McChroma...). Its
+# debug information is of no use here anyway.
+[profile.dev.package.openh264-sys2]
+debug = false
 debug-assertions = false
 overflow-checks = false
 [profile.dev.package.tract-data]
