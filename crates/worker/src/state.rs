@@ -8,11 +8,13 @@
 //! few seconds longer (`VOICE_HOLD`), in the database: there is no socket
 //! to keep it on.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use worker::js_sys;
+use worker::wasm_bindgen::JsCast;
 use worker::{Env, State as DoState, WebSocket};
 
 use crate::db::{Db, RowExt};
@@ -75,6 +77,11 @@ pub struct Sock {
     pub video: Option<String>,
     /// When the connection arrived, to drop the ones that never identify.
     pub opened: i64,
+    /// When something it sent last reached the object, noted at most every
+    /// few seconds (the heartbeat the runtime answers on its own does not
+    /// reach it; `last_heard` reads that one from the runtime).
+    #[serde(default)]
+    pub seen: i64,
 }
 
 pub struct State {
@@ -90,6 +97,9 @@ pub struct State {
     holds: RefCell<Option<Vec<Sock>>>,
     /// Uploads the sweep found abandoned, removed after the request.
     pub trash: Vec<Trash>,
+    /// When the connections were last checked for apps gone silent
+    /// (gateway.rs `sweep`); 0 after the object wakes up.
+    pub last_sweep: Cell<i64>,
 }
 
 impl State {
@@ -102,6 +112,7 @@ impl State {
             socks: RefCell::new(None),
             holds: RefCell::new(None),
             trash: Vec::new(),
+            last_sweep: Cell::new(0),
         }
     }
 
@@ -213,6 +224,107 @@ impl State {
         })
     }
 
+    /// Whether anyone is in a call through a connection now (the alarm
+    /// keeps checking those for apps gone silent, gateway.rs `next_wake`).
+    pub fn anyone_in_voice(&self) -> bool {
+        self.with_socks(|socks| socks.iter().any(|(_, s)| s.uid != 0 && s.voice != 0))
+    }
+
+    /// What the runtime says of a connection's last heartbeat it answered:
+    /// the value `getWebSocketAutoResponseTimestamp` gives (a Date, or
+    /// null for none), or why there is none to read.
+    fn auto_response(&self, ws: &WebSocket) -> Result<worker::wasm_bindgen::JsValue, &'static str> {
+        let state = self.ctx.as_raw();
+        js_sys::Reflect::get(state, &"getWebSocketAutoResponseTimestamp".into())
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+            .ok_or("missing")?
+            .call1(state, ws.as_ref())
+            .map_err(|_| "threw")
+    }
+
+    /// When the app behind a connection was last heard from: its last
+    /// heartbeat, which the runtime answers and dates without waking the
+    /// object, the last message that did reach it, or its arrival,
+    /// whichever came last (one that went quiet before its first heartbeat
+    /// is silent since it arrived). None when the runtime cannot say (no
+    /// such call there): then no connection is ever taken for gone.
+    fn last_heard(&self, ws: &WebSocket, s: &Sock) -> Option<i64> {
+        let auto = self.auto_response(ws).ok()?;
+        let at = match auto.dyn_ref::<js_sys::Date>() {
+            Some(d) if d.get_time().is_finite() => d.get_time() as i64,
+            Some(_) => 0,
+            None if auto.is_null() || auto.is_undefined() => 0,
+            None => return None,
+        };
+        Some(at.max(s.seen).max(s.opened))
+    }
+
+    /// Each connection as the tests see it (`/test/sockets`): who, which
+    /// call, since when, and when last heard from as the sweep reads it.
+    pub fn socket_report(&self) -> Vec<Value> {
+        self.with_socks(|socks| {
+            socks
+                .iter()
+                .map(|(ws, s)| {
+                    let auto = match self.auto_response(ws) {
+                        Err(why) => json!(why),
+                        Ok(v) => match v.dyn_ref::<js_sys::Date>() {
+                            Some(d) => json!(d.get_time()),
+                            None if v.is_null() || v.is_undefined() => Value::Null,
+                            None => json!(v.js_typeof().as_string()),
+                        },
+                    };
+                    json!({
+                        "id": s.id, "uid": s.uid, "voice": s.voice, "opened": s.opened,
+                        "seen": s.seen, "auto": auto, "heard": self.last_heard(ws, s),
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// The identified connections whose app was last heard from before
+    /// `cutoff`: a PC that lost power or the network sends nothing, not even
+    /// a goodbye, and the runtime may keep listing its socket for a long
+    /// time. Each with its socket, to close.
+    pub fn silent_socks(&self, cutoff: i64) -> Vec<(WebSocket, Sock)> {
+        self.with_socks(|socks| {
+            socks
+                .iter()
+                .filter(|(ws, s)| s.uid != 0 && self.last_heard(ws, s).is_some_and(|t| t < cutoff))
+                .map(|(ws, s)| (ws.clone(), s.clone()))
+                .collect()
+        })
+    }
+
+    /// Takes the call of one session (one install of the app) out of it:
+    /// the voice on that session's other connections, which can only be
+    /// gone ones (an app keeps one connection at a time), and the place held
+    /// for it. Not another PC's: each sign-in has a session of its own.
+    /// `except` is the connection asking. Returns the calls to tell.
+    pub fn end_session_voice(&self, uid: i64, token_hash: &str, except: u64) -> Vec<i64> {
+        let mut calls = Vec::new();
+        let stale: Vec<Sock> = self
+            .conns_of(uid)
+            .into_iter()
+            .filter(|s| s.id != except && s.voice != 0 && s.token_hash == token_hash)
+            .collect();
+        for mut s in stale {
+            calls.push(s.voice);
+            s.voice = 0;
+            s.video = None;
+            self.save_sock(s.id, s);
+        }
+        if self.held(uid).is_some_and(|h| h.token_hash == token_hash)
+            && let Some(h) = self.take_hold(uid)
+        {
+            self.drop_mail(uid);
+            calls.push(h.voice);
+        }
+        calls
+    }
+
     /// Sends one already encoded event to a set of connections.
     pub fn send_to(&self, ids: &[u64], msg: &str) {
         self.with_socks(|socks| {
@@ -233,8 +345,8 @@ impl State {
         let holds = slot.get_or_insert_with(|| {
             self.db
                 .all(
-                    "SELECT user_id, channel_id, joined, mute, deaf, video FROM voice_holds
-                     WHERE expires > ?",
+                    "SELECT user_id, channel_id, joined, mute, deaf, video, session
+                     FROM voice_holds WHERE expires > ?",
                     params![now()],
                 )
                 .unwrap_or_default()
@@ -246,6 +358,7 @@ impl State {
                     mute: r.int("mute") != 0,
                     deaf: r.int("deaf") != 0,
                     video: Some(r.str("video").to_owned()).filter(|v| !v.is_empty()),
+                    token_hash: r.str("session").to_owned(),
                     ..Default::default()
                 })
                 .collect()
@@ -259,12 +372,23 @@ impl State {
         let expires = now() + VOICE_HOLD;
         self.drop_mail(s.uid);
         self.db.run(
-            "INSERT INTO voice_holds(user_id, channel_id, joined, mute, deaf, video, expires)
-             VALUES(?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO voice_holds(user_id, channel_id, joined, mute, deaf, video, expires,
+               session)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id) DO UPDATE SET channel_id = excluded.channel_id,
                joined = excluded.joined, mute = excluded.mute, deaf = excluded.deaf,
-               video = excluded.video, expires = excluded.expires",
-            params![s.uid, s.voice, s.joined, s.mute, s.deaf, s.video, expires],
+               video = excluded.video, expires = excluded.expires,
+               session = excluded.session",
+            params![
+                s.uid,
+                s.voice,
+                s.joined,
+                s.mute,
+                s.deaf,
+                s.video,
+                expires,
+                s.token_hash
+            ],
         )?;
         *self.holds.borrow_mut() = None;
         Ok(expires)

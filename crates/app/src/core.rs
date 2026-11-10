@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -154,6 +154,13 @@ pub struct PendingFile {
     pub direct: bool,
     /// The key it went up encrypted with, along with `uploaded`.
     pub key: Option<crate::e2e::FileKey>,
+}
+
+/// A message's file saved where the person chose ("Baixar"), or on its way
+/// there. Kept while the app runs.
+pub enum Saved {
+    Going(Arc<crate::net::Progress>),
+    Done(PathBuf),
 }
 
 /// A message on its way, its files still going up (or, sent directly,
@@ -463,6 +470,17 @@ pub enum Msg {
         from: i64,
         path: PathBuf,
     },
+    /// Where to save a message's file, as the person chose it ("Baixar").
+    SaveTo {
+        attachment: Attachment,
+        path: PathBuf,
+    },
+    /// How saving it went: where it is, or why not.
+    Saved {
+        url: String,
+        name: String,
+        result: Result<PathBuf, String>,
+    },
     /// Where this PC stands with the account's keys (e2e/).
     E2e(crate::e2e::State),
     /// Keys that messages waited for arrived: they open now.
@@ -684,6 +702,8 @@ pub struct Core {
     pub direct_send: bool,
     /// The files sent directly: mine shared from here, and my downloads.
     pub direct: Arc<crate::direct::Direct>,
+    /// Messages' files saved with "Baixar" (or on their way), by address.
+    pub saves: HashMap<String, Saved>,
     /// Messages whose files are still going up.
     pub sending: Vec<Sending>,
     /// Messages sent through the gateway, not back from the server yet.
@@ -798,6 +818,30 @@ fn square_png(path: &std::path::Path, side: u32) -> Result<std::path::PathBuf, S
         .save(&file)
         .map_err(|e| crate::tf!("core.image_prepare_failed", e = e))?;
     Ok(file)
+}
+
+/// Opens a file the person downloaded in its program, or (`folder`) shows
+/// it in its folder, on a thread of its own.
+fn reveal(path: PathBuf, folder: bool) {
+    std::thread::spawn(move || {
+        let opened = if folder {
+            // Explorer reads `/select,"<path>"` as it is, quotes and all,
+            // so it goes without the usual quoting.
+            use std::os::windows::process::CommandExt;
+            let mut select = std::ffi::OsString::from("/select,\"");
+            select.push(path.as_os_str());
+            select.push("\"");
+            std::process::Command::new("explorer.exe")
+                .raw_arg(select)
+                .spawn()
+                .map(drop)
+        } else {
+            open::that(&path)
+        };
+        if let Err(e) = opened {
+            crate::logln!("baixados: não abri {}: {e}", path.display());
+        }
+    });
 }
 
 /// Asks where to save `picture` (an annotated screen or slide) and saves it
@@ -1051,6 +1095,7 @@ impl Core {
             files: Vec::new(),
             direct_send: false,
             direct,
+            saves: HashMap::new(),
             sending: Vec::new(),
             outbox: Vec::new(),
             next_send: 0,
@@ -1310,10 +1355,22 @@ impl Core {
                 from,
                 path,
             } => {
+                self.remember_folder(&path);
                 if let Err(e) = self.direct.download(&attachment, msg, cid, from, path) {
                     self.toast(e);
                 }
             }
+            Msg::SaveTo { attachment, path } => self.start_save(attachment, path),
+            Msg::Saved { url, name, result } => match result {
+                Ok(path) => {
+                    self.saves.insert(url, Saved::Done(path));
+                    self.toast(crate::tf!("core.download_done", name = name));
+                }
+                Err(e) => {
+                    self.saves.remove(&url);
+                    self.toast(crate::tf!("core.download_failed", name = name, e = e));
+                }
+            },
             Msg::E2e(state) => self.e2e_state(state),
             Msg::Keys => self.reopen_all(false),
             Msg::Sealed { send, env, missing } => self.sealed(send, env, missing),
@@ -1367,10 +1424,12 @@ impl Core {
     pub fn save_direct(&self, attachment: Attachment, msg: i64, cid: i64, from: i64) {
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
+        let (title, name, start) = self.save_dialog(&attachment);
         std::thread::spawn(move || {
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Salvar arquivo")
-                .set_file_name(&attachment.name)
+                .set_title(title)
+                .set_directory(start)
+                .set_file_name(name)
                 .save_file()
             else {
                 return;
@@ -1386,6 +1445,102 @@ impl Core {
         });
     }
 
+    /// "Baixar" on a message's file: where it goes is asked (on a thread
+    /// of its own, as the file picker is), and it comes down there,
+    /// decrypted on the way. Nothing opens or runs: that is "Abrir", after.
+    pub fn save_attachment(&mut self, attachment: Attachment) {
+        if matches!(self.saves.get(&attachment.url), Some(Saved::Going(_))) {
+            return;
+        }
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        let (title, name, start) = self.save_dialog(&attachment);
+        std::thread::spawn(move || {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title(title)
+                .set_directory(start)
+                .set_file_name(name)
+                .save_file()
+            else {
+                return;
+            };
+            let _ = tx.send(Msg::SaveTo { attachment, path });
+            ctx.request_repaint();
+        });
+    }
+
+    /// What the save dialog shows for a file someone sent: its title, the
+    /// file's name made safe (winsys.rs `safe_file_name`) and the folder it
+    /// opens in, the one the last file went to (Downloads the first time).
+    fn save_dialog(&self, a: &Attachment) -> (&'static str, String, PathBuf) {
+        let name = crate::winsys::safe_file_name(&a.name, crate::t!("core.file_default_name"));
+        let start = self
+            .prefs
+            .download_dir
+            .clone()
+            .filter(|d| d.is_dir())
+            .or_else(crate::winsys::downloads_dir)
+            .unwrap_or_default();
+        (crate::t!("core.save_file_title"), name, start)
+    }
+
+    /// The next save dialog opens where this file was put.
+    fn remember_folder(&mut self, path: &Path) {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            self.prefs.download_dir = Some(dir.to_owned());
+            self.save_prefs();
+        }
+    }
+
+    /// Brings a message's file down to `path`, as the person chose it. It
+    /// goes to a file beside it first, which takes its name only when whole
+    /// and checked, so a file chosen to be replaced is lost only to a good
+    /// copy; then it is marked as come from the internet, for Windows to
+    /// ask before running it.
+    pub(crate) fn start_save(&mut self, a: Attachment, path: PathBuf) {
+        self.remember_folder(&path);
+        let progress = crate::net::Progress::new(u64::try_from(a.size).unwrap_or(0));
+        self.saves
+            .insert(a.url.clone(), Saved::Going(progress.clone()));
+        let api = self.api.clone();
+        self.spawn(async move {
+            let mut part = path.as_os_str().to_owned();
+            part.push(".parcial");
+            let part = PathBuf::from(part);
+            let mut result = api.save_to(&a.url, &part, Some(&progress)).await;
+            if result.is_ok() {
+                result = tokio::fs::rename(&part, &path)
+                    .await
+                    .map_err(|e| e.to_string());
+                if result.is_err() {
+                    let _ = tokio::fs::remove_file(&part).await;
+                }
+            }
+            if result.is_ok() {
+                crate::winsys::mark_from_internet(&path);
+            }
+            Msg::Saved {
+                url: a.url,
+                name: a.name,
+                result: result.map(|()| path),
+            }
+        });
+    }
+
+    /// "Abrir" on a message's file saved here (or "Mostrar na pasta"). One
+    /// no longer there is offered to save again.
+    pub fn open_saved(&mut self, url: &str, folder: bool) {
+        let Some(Saved::Done(path)) = self.saves.get(url) else {
+            return;
+        };
+        if !path.exists() {
+            self.saves.remove(url);
+            self.toast(crate::t!("core.file_gone"));
+            return;
+        }
+        reveal(path.clone(), folder);
+    }
+
     /// "Abrir" on a downloaded file (or "Mostrar na pasta"): opened by
     /// Windows; one that is no longer there is offered again.
     pub fn open_direct(&mut self, id: &str, path: PathBuf, folder: bool) {
@@ -1394,25 +1549,7 @@ impl Core {
             self.toast(crate::t!("core.file_gone"));
             return;
         }
-        std::thread::spawn(move || {
-            let opened = if folder {
-                // Explorer reads `/select,"<path>"` as it is, quotes and
-                // all, so it goes without the usual quoting.
-                use std::os::windows::process::CommandExt;
-                let mut select = std::ffi::OsString::from("/select,\"");
-                select.push(path.as_os_str());
-                select.push("\"");
-                std::process::Command::new("explorer.exe")
-                    .raw_arg(select)
-                    .spawn()
-                    .map(drop)
-            } else {
-                open::that(&path)
-            };
-            if let Err(e) = opened {
-                crate::logln!("direto: não abri {}: {e}", path.display());
-            }
-        });
+        reveal(path, folder);
     }
 
     fn tray(&mut self, action: TrayAction) {
@@ -1434,7 +1571,10 @@ impl Core {
             return;
         }
         self.quitting = true;
-        self.voice.leave(true, Cue::None);
+        // Out of the call for the others at once (the leave goes out ahead
+        // of the connection's close), not when the place the server holds
+        // for a dropped connection runs out.
+        self.voice.leave(false, Cue::None);
         let call = self.voice.hanging_up();
         // Downloads and sends stop where they are (to go on next time),
         // and their lists are on the disk.
@@ -1613,6 +1753,9 @@ impl Core {
     /// Signs out. `silent` when the server already ended the session.
     pub fn logout(&mut self, silent: bool) {
         self.media.pause_all();
+        // Out of the call first, on the connection still open (the server
+        // also takes the session's call out as it signs it out).
+        self.voice.leave(false, Cue::Leave);
         if let Some(token) = self.api.token()
             && !silent
         {
@@ -1621,7 +1764,6 @@ impl Core {
         }
         self.api.set_token(None);
         self.shell.save_session(None);
-        self.voice.leave(true, Cue::Leave);
         self.direct.logout();
         self.e2e.stop();
         self.signals.clear();

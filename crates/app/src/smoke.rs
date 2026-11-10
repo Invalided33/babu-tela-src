@@ -424,6 +424,15 @@ impl Smoke {
             let whole = core.direct.report()["completed"].as_u64().unwrap_or(0);
             return self.hold_while(secs, 600, whole < n.parse().unwrap_or(1));
         }
+        // wait-salvo:<seconds>: every file saved with "Baixar" is down (or
+        // failed).
+        if let Some(secs) = step.strip_prefix("wait-salvo:") {
+            let going = core
+                .saves
+                .values()
+                .any(|s| matches!(s, crate::core::Saved::Going(_)));
+            return self.hold_while(secs, 60, going);
+        }
         let Some(secs) = step.strip_prefix("wait-sent:") else {
             return false;
         };
@@ -708,7 +717,7 @@ impl Smoke {
             // nothing left to do once they get here.
             (
                 "wait-sent" | "burst" | "until" | "wait-anims" | "wait-emoji" | "wait-direto-msg"
-                | "wait-direto-pct" | "wait-direto" | "wait-servido",
+                | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo",
                 _,
             ) => {}
             // direto:on|off: the composer's "Enviar direto", for the files
@@ -1034,6 +1043,24 @@ impl Smoke {
                         crate::logln!("vídeo de teste: {e}");
                     }
                 }
+            }
+            // salvar:<n>:<path>: "Baixar" on the n-th attachment of the
+            // newest message, with <path> as the place picked in its
+            // dialog; abrir-anexo:<n>: a click on it to open it.
+            ("salvar", rest) => {
+                let (n, path) = rest.split_once(':').unwrap_or(("0", rest));
+                match newest_attachment(core, n) {
+                    Some(a) => core.start_save(a, PathBuf::from(path)),
+                    None => self.misses.push(step.to_owned()),
+                }
+                return Duration::from_secs(2);
+            }
+            ("abrir-anexo", n) => {
+                match newest_attachment(core, n) {
+                    Some(a) => core.open_attachment(a),
+                    None => self.misses.push(step.to_owned()),
+                }
+                return Duration::from_secs(2);
             }
             // Plays the n-th attachment of the newest message.
             ("play", n) => {
@@ -1553,6 +1580,19 @@ impl Smoke {
         report["slides"] = core.voice.slides().report();
         report["direct"] = core.direct.report();
         report["directSend"] = json!(core.direct_send);
+        // Messages' files saved with "Baixar": where, or how far.
+        report["saves"] = core
+            .saves
+            .iter()
+            .map(|(url, s)| {
+                let state = match s {
+                    crate::core::Saved::Going(p) => json!({ "going": p.sent() }),
+                    crate::core::Saved::Done(path) => json!({ "done": path }),
+                };
+                (url.clone(), state)
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into();
         // The emoji list, and what the picker shows for the search typed.
         let mut emoji = core.emoji.report();
         emoji["recent"] = json!(core.prefs.emoji_recent);
@@ -1597,6 +1637,10 @@ impl Smoke {
             "channels": s.channels.iter().map(|c| json!({
                 "name": c.label(), "kind": c.kind, "category": c.category,
             })).collect::<Vec<_>>(),
+            // Who the server says is in each call, as this app shows it.
+            "inVoice": s.voice.iter().map(|(cid, users)| {
+                (cid.clone(), json!(users.iter().map(|u| u.user_id).collect::<Vec<_>>()))
+            }).collect::<serde_json::Map<_, _>>(),
         })));
         report["serverNames"] = json!(
             core.servers

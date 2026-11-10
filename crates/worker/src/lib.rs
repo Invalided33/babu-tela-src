@@ -146,15 +146,22 @@ impl DurableObject for Hub {
         ws: WebSocket,
         message: WebSocketIncomingMessage,
     ) -> Result<()> {
-        let Ok(mut st) = self.st.try_borrow_mut() else {
-            return Ok(());
-        };
-        st.refresh();
-        match message {
-            WebSocketIncomingMessage::String(text) => {
-                gateway::message(&mut st, &ws, text.as_bytes())
+        let wake = {
+            let Ok(mut st) = self.st.try_borrow_mut() else {
+                return Ok(());
+            };
+            st.refresh();
+            match message {
+                WebSocketIncomingMessage::String(text) => {
+                    gateway::message(&mut st, &ws, text.as_bytes())
+                }
+                WebSocketIncomingMessage::Binary(bytes) => gateway::message(&mut st, &ws, &bytes),
             }
-            WebSocketIncomingMessage::Binary(bytes) => gateway::message(&mut st, &ws, &bytes),
+        };
+        // Someone joined a call: the alarm watches it for apps gone silent
+        // (the state is let go first: the wait below must not hold it).
+        if let Some(at) = wake {
+            self.wake_at(at).await;
         }
         Ok(())
     }
@@ -175,7 +182,8 @@ impl DurableObject for Hub {
         Ok(())
     }
 
-    /// Places held in calls whose time ran out (gateway::alarm).
+    /// Places held in calls whose time ran out, and apps in calls gone
+    /// silent (gateway::alarm).
     async fn alarm(&self) -> Result<Response> {
         let next = match self.st.try_borrow_mut() {
             Ok(mut st) => gateway::alarm(&mut st),

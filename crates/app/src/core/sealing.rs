@@ -504,35 +504,25 @@ impl Core {
         self.call(req, Then::Nothing, ErrTo::Toast);
     }
 
-    /// A message's file opened in its program: it comes down to a folder of
-    /// the app's in %TEMP%, decrypted on the way (net.rs `save_to`).
+    /// A message's picture, video or sound opened in its program, to see or
+    /// hear it there: it comes down to a folder of the app's in %TEMP%,
+    /// decrypted on the way (net.rs `save_to`). Only what its name says it
+    /// is: the sender chooses both the name and what the app is told the
+    /// file is, and a program sent as a "picture" must not run on a click.
+    /// Anything else is offered to save instead (`save_attachment`).
     pub fn open_attachment(&mut self, a: Attachment) {
+        if !crate::net::opens_on_click(&a) {
+            self.save_attachment(a);
+            return;
+        }
         let api = self.api.clone();
-        self.toast(format!("Abrindo {}…", a.name));
+        self.toast(crate::tf!("core.opening", name = a.name));
+        let name = crate::winsys::safe_file_name(&a.name, crate::t!("core.file_default_name"));
         self.spawn(async move {
             let dir = std::env::temp_dir().join("babutela-arquivos");
             let _ = tokio::fs::create_dir_all(&dir).await;
-            // Only the name's last part, and nothing Windows refuses.
-            let name: String = a
-                .name
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or("arquivo")
-                .chars()
-                .map(|c| {
-                    if "<>:\"|?*".contains(c) || c.is_control() {
-                        '_'
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            let path = dir.join(if name.trim().is_empty() {
-                "arquivo"
-            } else {
-                &name
-            });
-            match api.save_to(&a.url, &path).await {
+            let path = dir.join(name);
+            match api.save_to(&a.url, &path, None).await {
                 Ok(()) => match open::that_detached(&path) {
                     Ok(()) => Msg::Toast(String::new()),
                     Err(e) => Msg::Toast(crate::tf!("core.open_failed", name = a.name, e = e)),

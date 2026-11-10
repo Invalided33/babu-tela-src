@@ -50,6 +50,9 @@ pub struct Prefs {
     /// The language chosen in Configurações (none: the Windows account's,
     /// set the first time the app runs).
     pub lang: Option<crate::lang::Lang>,
+    /// The folder the last file someone sent was saved to: the next save
+    /// dialog opens there (none: Downloads).
+    pub download_dir: Option<std::path::PathBuf>,
 }
 
 /// How loud one person plays on this PC: their voice and the sound of
@@ -149,6 +152,7 @@ mod tests {
             no_typing: false,
             tor: false,
             lang: Some(crate::lang::Lang::En),
+            download_dir: Some(r"D:\Arquivos\Baixados".into()),
         };
         p.save(&path);
 
@@ -160,6 +164,7 @@ mod tests {
         assert_eq!(back.people.get("7"), p.people.get("7"));
         assert_eq!(back.share_audio, Some(false));
         assert_eq!(back.lang, Some(crate::lang::Lang::En));
+        assert_eq!(back.download_dir, p.download_dir);
         assert_eq!(back.input_device, p.input_device);
         assert_eq!(back.output_device, None);
         assert_eq!(back.noise, Some(Noise::Padrao));

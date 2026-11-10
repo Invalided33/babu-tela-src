@@ -718,5 +718,11 @@
   "e2e.not_reader": "O servidor não me conta como leitor desta conversa.",
   "e2e.refused_envelope": "envelope inválido",
   "e2e.refused_replay": "repetida pelo servidor (o envelope já veio em outra mensagem)",
-  "e2e.refused_edit": "edição de outra mensagem"
+  "e2e.refused_edit": "edição de outra mensagem",
+
+  "core.save_file_title": "Salvar arquivo",
+  "core.opening": "Abrindo {name}…",
+  "core.file_default_name": "arquivo",
+  "chat.saving": "Baixando · {done} de {total} · {pct}%",
+  "chat.saving_short": "Baixando… {pct}%"
 }

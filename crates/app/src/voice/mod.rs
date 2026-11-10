@@ -479,6 +479,7 @@ impl Voice {
         }
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.channel = Some(channel);
+        self.gw.set_in_call(true);
 
         let (cmds, cmd_rx) = unbounded_channel();
         let (pictures, picture_rx) = unbounded_channel();
@@ -638,6 +639,7 @@ impl Voice {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
         self.channel = None;
+        self.gw.set_in_call(false);
         self.source = None;
         self.mute = false;
         self.deaf = false;

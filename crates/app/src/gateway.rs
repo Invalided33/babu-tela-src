@@ -10,12 +10,12 @@
 //! and in again starts a new one, and anything still arriving from an older
 //! one is ignored, so two sessions can never mix.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -27,6 +27,13 @@ const PING: &str = r#"{"op":"ping"}"#;
 
 /// How often the heartbeat goes out.
 const HEARTBEAT: Duration = Duration::from_secs(5);
+
+/// A connection that brings nothing for this long, not even the answer to
+/// three heartbeats, is dead (a network that dropped without a word, a NAT
+/// that forgot it): it is let go for a new one. The server gives up on a
+/// silent app later (25 s), so one coming back in time keeps its place in
+/// its call.
+const DEAD: Duration = Duration::from_secs(15);
 
 /// Longest wait between attempts to reconnect.
 const MAX_BACKOFF: Duration = Duration::from_secs(15);
@@ -70,6 +77,9 @@ pub struct Sender {
     slot: Arc<Mutex<Slot>>,
     current: Arc<AtomicU64>,
     kick: Arc<Notify>,
+    /// Whether the app is in a call (voice/mod.rs), which a new connection
+    /// tells the server as it identifies.
+    in_call: Arc<AtomicBool>,
 }
 
 impl Default for Sender {
@@ -81,6 +91,7 @@ impl Default for Sender {
             })),
             current: Arc::new(AtomicU64::new(0)),
             kick: Arc::new(Notify::new()),
+            in_call: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -127,6 +138,11 @@ impl Sender {
     /// Cuts short the wait before the next attempt ("Tentar agora").
     pub fn retry_now(&self) {
         self.kick.notify_one();
+    }
+
+    /// The call says whether it is on (Voice::join and Voice::leave).
+    pub fn set_in_call(&self, on: bool) {
+        self.in_call.store(on, Ordering::SeqCst);
     }
 
     fn attach(&self, generation: u64, tx: mpsc::UnboundedSender<Message>) -> bool {
@@ -244,8 +260,12 @@ async fn once(
 
     // Say who we are straight away: the server closes a connection that
     // stays quiet for ten seconds.
-    let hello = json!({ "op": "identify", "token": token }).to_string();
-    if write.send(Message::text(hello)).await.is_err() {
+    let in_call = sender.in_call.load(Ordering::SeqCst);
+    if write
+        .send(Message::text(op::identify(token, in_call).to_string()))
+        .await
+        .is_err()
+    {
         return false;
     }
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -277,7 +297,20 @@ async fn once(
     });
 
     let mut ready = false;
-    while let Some(Ok(frame)) = read.next().await {
+    // Silence counts only once a heartbeat was answered here: a server that
+    // never answers them must not have its connections dropped over and
+    // over.
+    let mut answered = false;
+    loop {
+        let frame = match tokio::time::timeout(DEAD, read.next()).await {
+            Ok(Some(Ok(frame))) => frame,
+            Ok(_) => break,
+            Err(_) if answered => {
+                crate::logln!("gateway: nada do servidor em {DEAD:?}; conectando de novo");
+                break;
+            }
+            Err(_) => continue,
+        };
         if !sender.is_current(generation) {
             break;
         }
@@ -293,6 +326,7 @@ async fn once(
         let Some((t, d)) = parse(&text) else { continue };
         // The heartbeat's answer carries nothing and needs no one.
         if t == "PONG" {
+            answered = true;
             continue;
         }
         if t == "READY" {
@@ -323,6 +357,14 @@ pub mod op {
     use serde_json::{Value, json};
 
     use crate::model::Video;
+
+    /// Who this is, and whether the app is in a call it takes up again on
+    /// this connection (its voice_join after READY): when it is not, the
+    /// server takes out what this session left in a call on a connection
+    /// that went without a goodbye (the app killed, the PC restarted).
+    pub fn identify(token: &str, in_call: bool) -> Value {
+        json!({ "op": "identify", "token": token, "inCall": in_call })
+    }
 
     pub fn typing(channel_id: i64) -> Value {
         json!({ "op": "typing", "channelId": channel_id })
@@ -415,6 +457,22 @@ mod tests {
         assert_eq!(v["channelId"], 7);
         assert_eq!(v["mute"], false);
         assert_eq!(v["video"], "screen");
+    }
+
+    #[test]
+    fn identify_says_whether_the_app_is_in_a_call() {
+        // The server takes this session's old place in a call out only when
+        // told plainly that the app is not in one.
+        let v = op::identify("t0k", false);
+        assert_eq!(v["op"], "identify");
+        assert_eq!(v["token"], "t0k");
+        assert_eq!(v["inCall"], false);
+        assert_eq!(op::identify("t0k", true)["inCall"], true);
+        // It follows the call: Voice::join and Voice::leave set it.
+        let sender = Sender::default();
+        assert!(!sender.in_call.load(Ordering::SeqCst));
+        sender.set_in_call(true);
+        assert!(sender.clone().in_call.load(Ordering::SeqCst));
     }
 
     #[test]

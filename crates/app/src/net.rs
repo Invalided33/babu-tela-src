@@ -134,6 +134,15 @@ pub fn kind_of_name(name: &str) -> crate::model::Kind {
     }
 }
 
+/// Whether a message's file may open in its program on a click, to look
+/// at or listen to: a picture, a video or a sound, and named as one. The
+/// sender chooses both the name and what the app is told the file is, so a
+/// program sent as a "picture" is only ever offered to save.
+pub fn opens_on_click(a: &crate::model::Attachment) -> bool {
+    use crate::model::Kind;
+    matches!(a.kind, Kind::Image | Kind::Video | Kind::Audio) && kind_of_name(&a.name) == a.kind
+}
+
 /// A part as a request body read from the file as it leaves, a piece at a
 /// time (so the parts going at once hold a few hundred KB, not 8 MiB each).
 /// It counts what leaves, for the bar and in `mine` for this part alone (to
@@ -687,15 +696,31 @@ impl Api {
     /// can be of any size. A message's file is decrypted on the way, block
     /// by block (e2e/file.rs); one that comes changed or cut short leaves
     /// nothing behind.
-    pub async fn save_to(&self, url: &str, path: &Path) -> Result<(), String> {
-        let saved = self.save_to_inner(url, path).await;
+    /// `progress` counts what is written, when given.
+    pub async fn save_to(
+        &self,
+        url: &str,
+        path: &Path,
+        progress: Option<&Progress>,
+    ) -> Result<(), String> {
+        let saved = self.save_to_inner(url, path, progress).await;
         if saved.is_err() {
             let _ = tokio::fs::remove_file(path).await;
         }
         saved
     }
 
-    async fn save_to_inner(&self, url: &str, path: &Path) -> Result<(), String> {
+    async fn save_to_inner(
+        &self,
+        url: &str,
+        path: &Path,
+        progress: Option<&Progress>,
+    ) -> Result<(), String> {
+        let wrote = |n: usize| {
+            if let Some(p) = progress {
+                p.sent.fetch_add(n as u64, Ordering::Relaxed);
+            }
+        };
         use tokio::io::AsyncWriteExt;
         let key = crate::e2e::key_for(url);
         let res = self
@@ -713,9 +738,9 @@ impl Api {
         let mut body = res.bytes_stream();
         let Some(key) = key else {
             while let Some(piece) = body.next().await {
-                file.write_all(&piece.map_err(|e| e.to_string())?)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let piece = piece.map_err(|e| e.to_string())?;
+                file.write_all(&piece).await.map_err(|e| e.to_string())?;
+                wrote(piece.len());
             }
             return file.flush().await.map_err(|e| e.to_string());
         };
@@ -734,6 +759,7 @@ impl Api {
                 file.write_all(&plain[..keep])
                     .await
                     .map_err(|e| e.to_string())?;
+                wrote(keep);
                 written += keep as u64;
                 buf.drain(..n);
                 block += 1;
@@ -833,6 +859,28 @@ pub fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_is_named_as_media_opens_on_a_click() {
+        use crate::model::{Attachment, Kind};
+        let file = |name: &str, kind: Kind| Attachment {
+            name: name.into(),
+            kind,
+            ..Default::default()
+        };
+        // Pictures, videos and sounds that are what they say.
+        assert!(opens_on_click(&file("praia.JPG", Kind::Image)));
+        assert!(opens_on_click(&file("aula.mp4", Kind::Video)));
+        assert!(opens_on_click(&file("nota.ogg", Kind::Audio)));
+        // A program the sender calls a picture or a video: never.
+        assert!(!opens_on_click(&file("foto.exe", Kind::Image)));
+        assert!(!opens_on_click(&file("video.mp4.bat", Kind::Video)));
+        assert!(!opens_on_click(&file("foto.png.", Kind::Image)));
+        // Nor any other file, even one whose name looks like a picture.
+        assert!(!opens_on_click(&file("planilha.xlsx", Kind::File)));
+        assert!(!opens_on_click(&file("foto.png", Kind::File)));
+        assert!(!opens_on_click(&file("foto.png", Kind::Direct)));
+    }
 
     #[test]
     fn addresses_are_built_from_the_base() {

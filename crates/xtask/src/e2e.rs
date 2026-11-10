@@ -11,6 +11,7 @@
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -236,6 +237,10 @@ impl T {
         .token()
     }
 
+    async fn gateway_with(&self, token: &str, extra: Value) -> Result<Gateway> {
+        Gateway::open_with(&self.base, &self.header, token, extra).await
+    }
+
     async fn gateway(&self, token: &str) -> Result<Gateway> {
         Gateway::open(&self.base, &self.header, token).await
     }
@@ -355,6 +360,18 @@ impl T {
                 req.send().await?.status().as_u16(),
                 404,
                 "sessão de teste no chat de verdade"
+            );
+        }
+        // Nor a look at who is connected, there.
+        for header in [None, Some(format!("errado:{}", self.run))] {
+            let mut req = self.http.get(format!("{}/api/test/sockets", self.base));
+            if let Some(h) = header {
+                req = req.header("x-babu-test", h);
+            }
+            same!(
+                req.send().await?.status().as_u16(),
+                404,
+                "as conexões à vista sem o segredo de teste"
             );
         }
         step("contas de teste, e nenhuma porta de teste no chat de verdade");
@@ -1565,6 +1582,89 @@ impl T {
         );
         step("chamadas só entre as pessoas: sinalização só dentro da chamada, sem SFU");
 
+        // Whether Beto is in the call, as Ana sees it: one person (her) or
+        // two.
+        let people =
+            |n: usize| move |d: &Value| d["users"].as_array().is_some_and(|u| u.len() == n);
+
+        // An app's call on an old connection the server has not seen go
+        // yet (the app reconnected): leaving through the new connection of
+        // the same app takes it out of the call.
+        b.op(json!({ "op": "voice_join", "channelId": voice }));
+        a.next("VOICE_STATE", people(2)).await?;
+        a.drain("VOICE_STATE");
+        let newer = self.gateway(&beto).await?;
+        newer.next("READY", |_| true).await?;
+        newer.op(json!({ "op": "voice_leave" }));
+        a.next("VOICE_STATE", people(1)).await?;
+        b.close().await;
+        let b = newer;
+        step("voz: sair por uma conexão nova do mesmo app tira da chamada");
+
+        // An app opened again after closing without a goodbye (killed, or
+        // the PC restarted) while its old connection is still on the
+        // server, in the call. Back out of the call, as its identify says,
+        // it takes its own place out at once: READY no longer shows it
+        // there, and nor does what the others get.
+        b.op(json!({ "op": "voice_join", "channelId": voice }));
+        a.next("VOICE_STATE", people(2)).await?;
+        a.drain("VOICE_STATE");
+        let back = self.gateway_with(&beto, json!({ "inCall": false })).await?;
+        let ready = back.next("READY", |_| true).await?;
+        let listed = ready["servers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s["voice"].get(voice.to_string()))
+            .filter_map(Value::as_array)
+            .flatten()
+            .any(|u| u["userId"] == b_id);
+        check!(
+            !listed,
+            "voz: o READY de quem voltou fora da chamada ainda o mostra nela"
+        );
+        a.next("VOICE_STATE", people(1)).await?;
+        b.close().await;
+        let b = back;
+        step("voz: o app que volta fora da chamada sai dela na hora, sem fantasma");
+
+        // A PC that lost power in a call: its connection stays open on the
+        // server, silent, and no goodbye comes. Once nothing of it arrives
+        // for a while (SILENT on the server, and the alarm's next round)
+        // it leaves the call and goes offline. Not before: an app that is
+        // only quiet keeps its place.
+        b.op(json!({ "op": "voice_join", "channelId": voice }));
+        a.next("VOICE_STATE", people(2)).await?;
+        a.drain("VOICE_STATE");
+        a.drain("PRESENCE");
+        b.silence();
+        let quiet = Instant::now();
+        if let Err(e) = a
+            .next_within("VOICE_STATE", people(1), Duration::from_secs(60))
+            .await
+        {
+            let seen = self.get("", "/test/sockets").await?.body;
+            fail!("voz: quem ficou em silêncio continua na chamada ({e}); o servidor vê: {seen}");
+        }
+        let gone = quiet.elapsed().as_secs();
+        check!(
+            gone >= 20,
+            "voz: tirou da chamada em {gone} s quem só parou de mandar sinal"
+        );
+        a.next("PRESENCE", |d| {
+            d["userId"] == b_id && d["status"] == "offline"
+        })
+        .await?;
+        step(&format!(
+            "voz: quem some sem fechar a conexão sai da chamada e fica offline ({gone} s)"
+        ));
+        let b = self.gateway(&beto).await?;
+        b.next("READY", |_| true).await?;
+        a.next("PRESENCE", |d| {
+            d["userId"] == b_id && d["status"] == "online"
+        })
+        .await?;
+
         b.op(json!({ "op": "status", "status": "dnd" }));
         same!(b.next("STATUS", |_| true).await?["status"], "dnd", "status");
         a.next("PRESENCE", |d| d["userId"] == b_id && d["status"] == "dnd")
@@ -2341,17 +2441,31 @@ impl T {
 }
 
 /// One app's WebSocket: events arrive in the background and the test takes
-/// them in the order it expects them.
+/// them in the order it expects them. It sends the app's heartbeat, as the
+/// app does: the server takes a connection silent for long for one whose PC
+/// is gone.
 struct Gateway {
     events: Arc<Mutex<Vec<Value>>>,
     arrived: Arc<Notify>,
     send: mpsc::UnboundedSender<Message>,
     /// Writes to the socket; ends once the close frame has gone out.
     writer: tokio::task::JoinHandle<()>,
+    /// Whether the heartbeat still goes out (`silence`).
+    beating: Arc<AtomicBool>,
 }
+
+/// The app's heartbeat, which the server's runtime answers on its own, and
+/// how often it goes (crates/app/src/gateway.rs).
+const PING: &str = r#"{"op":"ping"}"#;
+const HEARTBEAT: Duration = Duration::from_secs(5);
 
 impl Gateway {
     async fn open(base: &str, header: &str, token: &str) -> Result<Gateway> {
+        Gateway::open_with(base, header, token, json!({})).await
+    }
+
+    /// `open`, with more in the identify (what newer apps say).
+    async fn open_with(base: &str, header: &str, token: &str, extra: Value) -> Result<Gateway> {
         let url = format!("ws{}/gateway", base.strip_prefix("http").unwrap_or(base));
         let mut req = url.into_client_request()?;
         req.headers_mut().insert("x-babu-test", header.parse()?);
@@ -2379,6 +2493,10 @@ impl Gateway {
                         _ => continue,
                     };
                     if let Ok(ev) = serde_json::from_str::<Value>(&text) {
+                        // The heartbeat's answer says nothing to the tests.
+                        if ev["t"] == "PONG" {
+                            continue;
+                        }
                         events
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
@@ -2388,14 +2506,37 @@ impl Gateway {
                 }
             });
         }
+        let beating = Arc::new(AtomicBool::new(true));
+        {
+            let (send, beating) = (send.clone(), beating.clone());
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(HEARTBEAT).await;
+                    if !beating.load(Ordering::Relaxed) || send.send(Message::text(PING)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
         let gw = Gateway {
             events,
             arrived,
             send,
             writer,
+            beating,
         };
-        gw.op(json!({ "op": "identify", "token": token }));
+        let mut hello = json!({ "op": "identify", "token": token });
+        if let (Some(hello), Value::Object(extra)) = (hello.as_object_mut(), extra) {
+            hello.extend(extra);
+        }
+        gw.op(hello);
         Ok(gw)
+    }
+
+    /// Stops the heartbeat and everything else, the connection left open:
+    /// what the server sees of a PC that lost power or its network.
+    fn silence(&self) {
+        self.beating.store(false, Ordering::Relaxed);
     }
 
     fn op(&self, msg: Value) {
@@ -2423,7 +2564,17 @@ impl Gateway {
 
     /// The first event of type `t` (not taken yet) whose data passes `pred`.
     async fn next(&self, t: &str, pred: impl Fn(&Value) -> bool) -> Result<Value> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        self.next_within(t, pred, Duration::from_secs(10)).await
+    }
+
+    /// `next`, waiting up to `wait`.
+    async fn next_within(
+        &self,
+        t: &str,
+        pred: impl Fn(&Value) -> bool,
+        wait: Duration,
+    ) -> Result<Value> {
+        let deadline = tokio::time::Instant::now() + wait;
         loop {
             let notified = self.arrived.notified();
             {

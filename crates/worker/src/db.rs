@@ -18,7 +18,7 @@ use crate::util::{ApiError, ApiResult, INTERNAL, fail};
 
 /// Bumped whenever SCHEMA or the migrations below change, so a warm object
 /// only runs one query instead of the whole script.
-const SCHEMA_VERSION: &str = "13";
+const SCHEMA_VERSION: &str = "14";
 
 /// Columns that came after their table, added to it where missing (a table
 /// made by an older version), as `migrate` does: table, column, its type.
@@ -37,6 +37,9 @@ const SCHEMA_VERSION: &str = "13";
 ///   carries (12).
 /// - channels.ttl: how long its messages last, in seconds (0: for good);
 ///   messages.gone_at: when one goes (ms), for a channel with one (12).
+/// - voice_holds.session: the session (its token_hash) whose place is
+///   held, so the same install coming back out of the call gives it up at
+///   once (14).
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("servers", "icon", "TEXT"),
     ("servers", "private", "INTEGER NOT NULL DEFAULT 0"),
@@ -46,6 +49,7 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("invites", "cert", "TEXT"),
     ("channels", "ttl", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "gone_at", "INTEGER"),
+    ("voice_holds", "session", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 // `google_sub` is the Google account a user signs in with (its `sub`, which

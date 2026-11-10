@@ -718,5 +718,11 @@
   "e2e.not_reader": "The server doesn't list me as a reader of this conversation.",
   "e2e.refused_envelope": "invalid envelope",
   "e2e.refused_replay": "replayed by the server (the envelope already came in another message)",
-  "e2e.refused_edit": "an edit of another message"
+  "e2e.refused_edit": "an edit of another message",
+
+  "core.save_file_title": "Save file",
+  "core.opening": "Opening {name}…",
+  "core.file_default_name": "file",
+  "chat.saving": "Downloading · {done} of {total} · {pct}%",
+  "chat.saving_short": "Downloading… {pct}%"
 }

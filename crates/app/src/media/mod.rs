@@ -544,7 +544,7 @@ fn decode(source: Source, job: Job) {
             // Media Foundation could not read the address itself (a proxy
             // in the way, say): the file comes down whole first, to disk.
             let path = temp_path(&ext);
-            if let Err(e) = rt.block_on(api.save_to(&url, &path)) {
+            if let Err(e) = rt.block_on(api.save_to(&url, &path, None)) {
                 let _ = std::fs::remove_file(&path);
                 return shared.fail(format!("baixando: {e}"));
             }

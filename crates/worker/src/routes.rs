@@ -119,6 +119,8 @@ pub const ROUTES: &[(&str, &str, bool, Handler)] = &[
     ("POST", "/api/login", false, gone),
     // only on a test database: an account and a session, for the tests
     ("POST", "/api/test/session", false, test_session),
+    // only on a test database: the connections as the server sees them
+    ("GET", "/api/test/sockets", false, test_sockets),
     // servers
     ("POST", "/api/servers", true, create_server),
     ("PATCH", "/api/servers/{sid}", true, update_server),
@@ -263,11 +265,32 @@ fn gone(_: &mut State, _: &mut Req) -> ApiResult {
 }
 
 fn logout(st: &mut State, q: &mut Req) -> ApiResult {
+    // Out of its call at once too, not when its connection closes and the
+    // place held for it runs out.
+    let mut calls = st.end_session_voice(q.uid, &q.token_hash, 0);
+    calls.dedup();
+    for cid in calls {
+        st.announce_voice(cid)?;
+    }
     st.db.run(
         "DELETE FROM sessions WHERE token_hash = ?",
         params![q.token_hash],
     )?;
     ok()
+}
+
+/// The tests' look at the connections, on a test database only: who each
+/// is, its call, and when it was last heard from, for a failing test to say
+/// why. The real chat answers like any unknown route.
+fn test_sockets(st: &mut State, q: &mut Req) -> ApiResult {
+    if !q.test {
+        return fail(404, "Rota não encontrada");
+    }
+    Ok(json!({
+        "now": crate::util::now(),
+        "lastSweep": st.last_sweep.get(),
+        "sockets": st.socket_report(),
+    }))
 }
 
 /// The tests' way in: on a test database only (a fresh, empty one per run),

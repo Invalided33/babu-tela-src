@@ -37,24 +37,20 @@ pub fn audio(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
     ui.spacing_mut().item_spacing.x = 10.0;
     let player = core.media.peek(&a.url);
     play_button(ui, player, a, acts, 36.0);
-    let rest = ui.available_width() - 40.0;
+    // Room for the sound's button and the download's after the name.
+    let rest = ui.available_width() - 40.0 - 38.0;
     ui.allocate_ui_with_layout(
         vec2(rest.max(60.0), 48.0),
         Layout::top_down(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
-            let name = widgets::ellipsis(ui, &a.name, theme::small(), TEXT)
-                .interact(Sense::click())
-                .on_hover_cursor(CursorIcon::PointingHand)
-                .on_hover_text(t!("chat.open"));
-            if name.clicked() {
-                super::chat::open_attachment(acts, &core.api, a);
-            }
+            widgets::ellipsis(ui, &a.name, theme::small(), TEXT);
             // The line and the time side by side, under the name.
             ui.horizontal(|ui| bar(ui, player, &a.url, acts));
         },
     );
     mute_button(ui, player, &a.url, acts);
+    super::chat::download_button(ui, core, a, 28.0, acts);
 }
 
 /// A video attachment: its picture (or a dark box with a play sign before it
@@ -120,7 +116,9 @@ pub fn video(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts, max: Vec
     let ui = &mut row;
     ui.spacing_mut().item_spacing.x = 8.0;
     play_button(ui, player, a, acts, 28.0);
-    let room = ui.available_width() - if enlarged { 40.0 } else { 76.0 };
+    // Room for the sound's button, the download's and (in the chat) the
+    // enlarged view's: 28 px and the gap each.
+    let room = ui.available_width() - if enlarged { 76.0 } else { 112.0 };
     ui.allocate_ui_with_layout(
         vec2(room.max(60.0), 28.0),
         Layout::left_to_right(Align::Center),
@@ -129,6 +127,7 @@ pub fn video(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts, max: Vec
         },
     );
     mute_button(ui, player, &a.url, acts);
+    super::chat::download_button(ui, core, a, 28.0, acts);
     if !enlarged {
         let expand = widgets::icon_button(ui, Icon::Expand, 28.0, Ib::Bare, t!("player.enlarge"));
         if expand.clicked() {

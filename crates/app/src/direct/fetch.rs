@@ -328,11 +328,13 @@ async fn talk(
     }
 }
 
-/// Whole: the file takes its name.
+/// Whole: the file takes its name, marked as come from the internet (for
+/// Windows to ask before running it, as with what a browser downloads).
 fn finish(job: &Job) -> End {
     if let Err(e) = std::fs::rename(&job.partial, &job.path) {
         return End::Disk(e.to_string());
     }
+    crate::winsys::mark_from_internet(&job.path);
     let _ = std::fs::remove_file(&job.hashes);
     End::Done
 }

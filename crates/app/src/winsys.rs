@@ -583,8 +583,162 @@ pub fn memory_parts() -> serde_json::Value {
     })
 }
 
+// ---------------------------------------------------------------- files from others
+
+/// A name someone else chose for a file, made fit to offer as its name on
+/// this PC: only its last part (never a folder), without what Windows
+/// refuses in a name, the invisible characters that turn text around
+/// ("foto\u{202E}gnp.exe" reads as "fotoexe.png"), the dots and spaces
+/// Windows drops from the end (which can change the extension) and the
+/// device names (CON, NUL, COM1…). An empty one becomes `fallback`.
+pub fn safe_file_name(name: &str, fallback: &str) -> String {
+    const MAX: usize = 180;
+    let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let cleaned: String = last
+        .chars()
+        .filter(|c| !invisible(*c))
+        .map(|c| {
+            if c.is_control() || "<>:\"|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mut s = cleaned
+        .trim_start_matches(' ')
+        .trim_end_matches(['.', ' '])
+        .to_owned();
+    if s.is_empty() {
+        s = fallback.to_owned();
+    }
+    if s.chars().count() > MAX {
+        let (base, ext) = match s.rfind('.') {
+            Some(i) if i > 0 && s.len() - i <= 16 => (&s[..i], &s[i..]),
+            _ => (s.as_str(), ""),
+        };
+        let base: String = base.chars().take(MAX - ext.chars().count()).collect();
+        s = format!("{}{ext}", base.trim_end_matches(['.', ' ']));
+    }
+    // "con.txt" opens the console, not a file.
+    let stem = s
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix).is_some_and(|n| {
+            let mut n = n.chars();
+            matches!((n.next(), n.next()), (Some(d), None) if d.is_ascii_digit() || "¹²³".contains(d))
+        })
+    };
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
+    {
+        s.insert(0, '_');
+    }
+    s
+}
+
+/// Characters that show nothing but change how the text around them reads.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
+/// The person's Downloads folder, wherever they moved it.
+pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the string Windows hands back is the caller's to free, done
+    // right here.
+    let known = unsafe {
+        SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None)
+            .ok()
+            .and_then(|p| {
+                let path = p.to_string().ok();
+                CoTaskMemFree(Some(p.0 as *const _));
+                path
+            })
+    };
+    known.map(std::path::PathBuf::from).or_else(|| {
+        std::env::var_os("USERPROFILE").map(|home| std::path::PathBuf::from(home).join("Downloads"))
+    })
+}
+
+/// Marks a file as come from the internet (its Zone.Identifier stream, the
+/// "Mark of the Web"), as browsers do with what they download: Windows then
+/// asks before running it (SmartScreen), and Office opens it in Protected
+/// View. A drive without such streams (FAT32, exFAT) goes without.
+pub fn mark_from_internet(path: &Path) {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    if let Err(e) = std::fs::write(&stream, "[ZoneTransfer]\r\nZoneId=3\r\n") {
+        crate::logln!("marca de internet: {}: {e}", path.display());
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_from_others_are_made_safe() {
+        let safe = |n: &str| super::safe_file_name(n, "arquivo");
+        assert_eq!(safe("relatório final.pdf"), "relatório final.pdf");
+        // Never a folder: only the last part.
+        assert_eq!(safe("..\\..\\Windows\\System32\\evil.dll"), "evil.dll");
+        assert_eq!(safe("a/b/c.txt"), "c.txt");
+        // What Windows refuses, a stream name included.
+        assert_eq!(safe("o que?.txt"), "o que_.txt");
+        assert_eq!(safe("x.exe:Zone.Identifier"), "x.exe_Zone.Identifier");
+        assert_eq!(safe("tab\there.txt"), "tab_here.txt");
+        // Text turned around to hide the real extension.
+        assert_eq!(safe("foto\u{202E}gnp.exe"), "fotognp.exe");
+        assert_eq!(safe("a\u{200B}b.png"), "ab.png");
+        // Windows drops dots and spaces at the end, and with them the
+        // extension it seemed to have.
+        assert_eq!(safe("doc.pdf.   "), "doc.pdf");
+        assert_eq!(safe("  espaços.txt"), "espaços.txt");
+        // Devices, with or without an extension.
+        assert_eq!(safe("con.txt"), "_con.txt");
+        assert_eq!(safe("NUL"), "_NUL");
+        assert_eq!(safe("COM1.log"), "_COM1.log");
+        assert_eq!(safe("lpt¹"), "_lpt¹");
+        assert_eq!(safe("console.txt"), "console.txt");
+        assert_eq!(safe("COM10.txt"), "COM10.txt");
+        // Nothing left: the fallback.
+        assert_eq!(safe(""), "arquivo");
+        assert_eq!(safe("..."), "arquivo");
+        assert_eq!(safe("dir/"), "arquivo");
+        // Too long: cut, keeping the extension.
+        let cut = safe(&format!("{}.zip", "a".repeat(400)));
+        assert!(cut.ends_with(".zip") && cut.chars().count() <= 180, "{cut}");
+        let cut = safe(&"é".repeat(400));
+        assert_eq!(cut.chars().count(), 180);
+    }
+
+    #[test]
+    fn files_from_the_internet_say_so() {
+        let dir = std::env::temp_dir().join(format!("babutela-marca-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("baixado.exe");
+        std::fs::write(&file, b"MZ").unwrap();
+        super::mark_from_internet(&file);
+        let mut stream = file.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let zone = std::fs::read_to_string(&stream).unwrap();
+        assert!(
+            zone.contains("[ZoneTransfer]") && zone.contains("ZoneId=3"),
+            "{zone}"
+        );
+        // The file itself is untouched.
+        assert_eq!(std::fs::read(&file).unwrap(), b"MZ");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(super::downloads_dir().is_some_and(|d| d.is_absolute()));
+    }
+
     #[test]
     fn dpapi_round_trip() {
         let enc = super::protect(b"token secreto").unwrap();

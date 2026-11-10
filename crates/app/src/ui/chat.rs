@@ -8,8 +8,8 @@ use egui::{
 };
 
 use super::Acts;
-use super::widgets::{self, Ib};
-use crate::core::{Action, Core, Editing, Modal, Pick, PopKind};
+use super::widgets::{self, Button, Ib};
+use crate::core::{Action, Core, Editing, Modal, Pick, PopKind, Saved};
 use crate::giphy::{self, Frames, Lookup};
 use crate::icons::{self, Icon};
 use crate::images::{Fit, Images};
@@ -92,15 +92,63 @@ fn seal_line(ui: &mut Ui, m: &Message) {
     ui.label(egui::RichText::new(text).size(11.0).color(color));
 }
 
-/// Opens an attachment by its name: a message's file (encrypted on the
-/// server) comes down decrypted and opens in its program; anything else
-/// opens in the browser.
+/// Opens a picture, a video or a sound to see or hear it: a message's file
+/// (encrypted on the server) comes down decrypted and opens in its program
+/// (only what it says it is: Core::open_attachment); anything else opens in
+/// the browser.
 pub fn open_attachment(acts: &mut Acts, api: &crate::net::Api, a: &Attachment) {
     if crate::e2e::key_for(&a.url).is_some() {
         let a = a.clone();
         acts.later(move |c| c.open_attachment(a));
     } else {
         open_external(api.absolute(&a.url));
+    }
+}
+
+/// "Baixar": a message's file is saved where the person chooses, and
+/// nothing runs (Core::save_attachment); one from before the encryption
+/// goes to the browser, which downloads it its own way.
+pub fn save_attachment(acts: &mut Acts, api: &crate::net::Api, a: &Attachment) {
+    if crate::e2e::key_for(&a.url).is_some() {
+        let a = a.clone();
+        acts.later(move |c| c.save_attachment(a));
+    } else {
+        open_external(api.absolute(&a.url));
+    }
+}
+
+/// The download button of a message's file, `side` points: "Baixar",
+/// how far it is while it comes down, and once saved, its folder.
+pub(super) fn download_button(
+    ui: &mut Ui,
+    core: &Core,
+    a: &Attachment,
+    side: f32,
+    acts: &mut Acts,
+) {
+    match core.saves.get(&a.url) {
+        Some(Saved::Going(p)) => {
+            let tip = tf!(
+                "chat.saving_short",
+                pct = (p.fraction() * 100.0).floor() as u32
+            );
+            widgets::icon_button(ui, Icon::Save, side, Ib::On, &tip);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        Some(Saved::Done(_)) => {
+            let tip = t!("direct.show_in_folder");
+            if widgets::icon_button(ui, Icon::Folder, side, Ib::Bare, tip).clicked() {
+                let url = a.url.clone();
+                acts.later(move |c| c.open_saved(&url, true));
+            }
+        }
+        None => {
+            let tip = t!("direct.download");
+            if widgets::icon_button(ui, Icon::Save, side, Ib::Bare, tip).clicked() {
+                save_attachment(acts, &core.api, a);
+            }
+        }
     }
 }
 
@@ -1497,7 +1545,7 @@ fn message(
                         super::player::audio(ui, core, a, acts);
                     }
                 } else {
-                    attachment(ui, &core.images, &core.api, a, acts);
+                    attachment(ui, core, a, acts);
                 }
             }
             if !m.reactions.is_empty() {
@@ -1839,31 +1887,16 @@ fn reactions(ui: &mut Ui, core: &Core, m: &Message, acts: &mut Acts) {
     });
 }
 
-/// A picture inline, anything else as a card that opens it. A message's
-/// file is encrypted on the server (e2e/file.rs): it comes down here,
-/// decrypted, and opens in its program, instead of in the browser, which
-/// would only get the encrypted bytes.
-fn attachment(
-    ui: &mut Ui,
-    images: &std::sync::Arc<Images>,
-    api: &crate::net::Api,
-    a: &Attachment,
-    acts: &mut Acts,
-) {
+/// A picture inline (a click opens it to look at, "Baixar" over its corner
+/// saves it), anything else as a card that saves it where the person
+/// chooses. A message's file is encrypted on the server (e2e/file.rs): it
+/// comes down here, decrypted. Nothing a click brings down runs by itself.
+fn attachment(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
     ui.add_space(4.0);
-    let url = api.absolute(&a.url);
     let sealed = crate::e2e::key_for(&a.url).is_some();
-    let open = |acts: &mut Acts, url: String| {
-        if sealed {
-            let a = a.clone();
-            acts.later(move |c| c.open_attachment(a));
-        } else {
-            open_external(url);
-        }
-    };
     if a.kind == Kind::Image {
         let max = vec2(ui.available_width().min(420.0), 320.0);
-        let resp = match images.get(&a.url, Fit::Within(840)) {
+        let resp = match core.images.get(&a.url, Fit::Within(840)) {
             Some(t) => {
                 let natural = Images::size_of(&t);
                 let scale = (max.x / natural.x).min(max.y / natural.y).min(1.0);
@@ -1883,12 +1916,26 @@ fn attachment(
                 resp
             }
         };
+        let picture = resp.rect;
         if resp
             .on_hover_cursor(CursorIcon::PointingHand)
             .on_hover_text(&a.name)
             .clicked()
         {
-            open(acts, url);
+            open_attachment(acts, &core.api, a);
+        }
+        // Its button, at the top right while the pointer is on it (and
+        // while it comes down or once saved, to say so).
+        if ui.rect_contains_pointer(picture) || core.saves.contains_key(&a.url) {
+            const SIDE: f32 = 30.0;
+            let corner = Rect::from_min_size(
+                pos2(picture.right() - 6.0 - SIDE, picture.top() + 6.0),
+                Vec2::splat(SIDE),
+            );
+            ui.painter()
+                .circle_filled(corner.center(), SIDE / 2.0, BG0.gamma_multiply(0.9));
+            let mut over = ui.new_child(egui::UiBuilder::new().max_rect(corner));
+            download_button(&mut over, core, a, SIDE, acts);
         }
         return;
     }
@@ -1897,36 +1944,99 @@ fn attachment(
         Kind::Audio => Icon::Play,
         _ => Icon::File,
     };
-    let resp = Frame::new()
+    let saved = core.saves.get(&a.url);
+    let card = Frame::new()
         .fill(BG1)
         .stroke(Stroke::new(1.0, BG4))
         .corner_radius(CornerRadius::same(RADIUS_MD))
         .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            let row = ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 ui.add(icon.tinted(ACCENT));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(egui::RichText::new(&a.name).color(ACCENT));
-                    ui.label(
-                        egui::RichText::new(widgets::fmt_size(a.size))
-                            .size(12.0)
-                            .color(MUTED),
-                    );
+                    let line = match saved {
+                        Some(Saved::Going(p)) => tf!(
+                            "chat.saving",
+                            done = widgets::fmt_size(p.sent() as i64),
+                            total = widgets::fmt_size(p.total() as i64),
+                            pct = (p.fraction() * 100.0).floor() as u32
+                        ),
+                        _ => widgets::fmt_size(a.size),
+                    };
+                    ui.label(egui::RichText::new(line).size(12.0).color(MUTED));
                 });
+                if saved.is_none() && sealed {
+                    ui.add(Icon::Save.image(icons::SIZE, MUTED));
+                }
             });
-        })
-        .response
-        .interact(Sense::click())
-        .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text(if sealed {
-            t!("chat.open")
-        } else {
-            t!("chat.open_in_browser")
+            let width = row.response.rect.width();
+            match saved {
+                Some(Saved::Going(p)) => {
+                    ui.add_space(6.0);
+                    let (rect, _) = ui.allocate_exact_size(vec2(width, 4.0), Sense::hover());
+                    ui.painter().rect_filled(rect, CornerRadius::same(2), BG3);
+                    let mut done = rect;
+                    done.set_width(rect.width() * p.fraction());
+                    ui.painter()
+                        .rect_filled(done, CornerRadius::same(2), ACCENT);
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Some(Saved::Done(path)) => {
+                    let place = path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.add(Icon::Folder.image(icons::SMALL, ONLINE));
+                        ui.label(
+                            egui::RichText::new(tf!("direct.downloaded", place = place))
+                                .size(12.0)
+                                .color(ONLINE),
+                        );
+                    });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        // The message's row lays its parts out without gaps.
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if Button::primary(t!("chat.open")).small().show(ui).clicked() {
+                            let url = a.url.clone();
+                            acts.later(move |c| c.open_saved(&url, false));
+                        }
+                        if Button::ghost(t!("direct.show_in_folder"))
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
+                            let url = a.url.clone();
+                            acts.later(move |c| c.open_saved(&url, true));
+                        }
+                    });
+                }
+                None => {}
+            }
         });
-    if resp.clicked() {
-        open(acts, url);
+    // The card as a whole takes the click only while it waits to be saved:
+    // after that, its buttons do.
+    if saved.is_none() {
+        let resp = card
+            .response
+            .interact(Sense::click())
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text(if sealed {
+                t!("direct.download")
+            } else {
+                t!("chat.open_in_browser")
+            });
+        if resp.clicked() {
+            save_attachment(acts, &core.api, a);
+        }
     }
 }
 

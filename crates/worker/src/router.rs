@@ -19,6 +19,7 @@ pub async fn serve(hub: &Hub, req: Request) -> Result<Response> {
         let st = hub.st.borrow();
         st.refresh();
         gateway::drop_silent(&st);
+        gateway::sweep_sometimes(&st);
     }
     let mut res = route(hub, req).await?;
     // A WebSocket handshake (101) is handed to the runtime untouched: its
