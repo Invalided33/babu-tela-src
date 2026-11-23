@@ -2235,9 +2235,8 @@ impl Call {
                         p.control.post_ordered(msg);
                     }
                     // The music queue, so the new person sees what is
-                    // playing and what comes next.
-                    let snapshot = ctx.music.snapshot();
-                    if snapshot["queue"].as_array().is_some_and(|a| !a.is_empty()) {
+                    // playing and what comes next, and its volume.
+                    if let Some(snapshot) = ctx.music.snapshot() {
                         p.control.post(snapshot);
                     }
                 }

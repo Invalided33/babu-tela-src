@@ -4,9 +4,9 @@
 //! next item's adder takes over.
 //!
 //! The state travels through the "controle" data channel of the voice
-//! connections, in messages tagged `m-add`, `m-skip`, `m-pause`, `m-play`
-//! and `m-state`. Nothing persists on the server: the queue dies with the
-//! last person in the call.
+//! connections, in messages tagged `m-add`, `m-skip`, `m-pause`, `m-play`,
+//! `m-volume` and `m-state`. Nothing persists on the server: the queue dies
+//! with the last person in the call.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -57,6 +57,8 @@ pub struct View {
     /// the first item instead.)
     #[allow(dead_code)]
     pub dj: Option<i64>,
+    /// How loud the music goes out to everyone, 0 to 1 (`m-volume`).
+    pub volume: f32,
 }
 
 /// The shared queue. All methods are safe to call from any thread.
@@ -84,6 +86,9 @@ struct Inner {
     /// Who is in the call now, so a drop-off handovers the DJ to the next
     /// person with a song in the queue.
     members: Vec<i64>,
+    /// How loud the DJ sends the music, for everyone, 0 to 1. Anyone in
+    /// the call sets it, as anyone pauses.
+    volume: f32,
 }
 
 impl Default for Inner {
@@ -94,6 +99,7 @@ impl Default for Inner {
             started_at: None,
             offset: Duration::ZERO,
             members: Vec::new(),
+            volume: 1.0,
         }
     }
 }
@@ -137,7 +143,36 @@ impl Queue {
             state: g.state,
             elapsed,
             dj: g.items.front().map(|it| it.by),
+            volume: g.volume,
         }
+    }
+
+    /// How loud the music goes out, 0 to 1.
+    pub fn volume(&self) -> f32 {
+        self.lock().volume
+    }
+
+    /// Sets how loud the music goes out for everyone. Returns `true` when
+    /// it changed.
+    pub fn set_volume(&self, volume: f32) -> bool {
+        let volume = clamp_volume(volume);
+        let changed = {
+            let mut g = self.lock();
+            let changed = (g.volume - volume).abs() > f32::EPSILON;
+            g.volume = volume;
+            changed
+        };
+        if changed {
+            self.bump();
+        }
+        changed
+    }
+
+    /// Whether someone who just joined needs `m-state`: there are songs, or
+    /// the volume is not the one a new queue starts at.
+    pub fn worth_telling(&self) -> bool {
+        let g = self.lock();
+        !g.items.is_empty() || (g.volume - 1.0).abs() > f32::EPSILON
     }
 
     /// The current song, if any (for the UI's "now playing").
@@ -194,6 +229,7 @@ impl Queue {
             g.started_at = None;
             g.offset = Duration::ZERO;
             g.state = State::Playing;
+            g.volume = 1.0;
         }
         self.bump();
     }
@@ -216,6 +252,10 @@ impl Queue {
             }
             Some("m-pause") => self.set_paused(true),
             Some("m-play") => self.set_paused(false),
+            Some("m-volume") => match msg["v"].as_f64() {
+                Some(v) => self.set_volume(v as f32),
+                None => false,
+            },
             Some("m-start") => {
                 let Some(id) = msg["id"].as_str() else {
                     return false;
@@ -237,12 +277,17 @@ impl Queue {
                     .filter(|v| v.is_finite() && *v >= 0.0)
                     .map(Duration::from_secs_f64)
                     .unwrap_or_default();
+                // From an app that knows no volume: as it comes.
+                let volume = msg["volume"]
+                    .as_f64()
+                    .map_or(1.0, |v| clamp_volume(v as f32));
                 let changed = {
                     let mut g = self.lock();
                     if g.items.is_empty() {
                         g.items = items;
                         g.state = state;
                         g.offset = elapsed;
+                        g.volume = volume;
                         // Only roll the clock when the DJ had already
                         // begun playing: a snapshot of a song still being
                         // downloaded has `at == 0`, and the clock stays
@@ -387,7 +432,18 @@ impl Queue {
             "queue": items,
             "paused": g.state == State::Paused,
             "at": elapsed,
+            "volume": g.volume,
         })
+    }
+}
+
+/// A volume for everyone, kept between 0 and 1 (anything else, as it
+/// comes).
+fn clamp_volume(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, 1.0)
+    } else {
+        1.0
     }
 }
 
@@ -445,6 +501,11 @@ pub fn play_message() -> Value {
     json!({ "t": "m-play" })
 }
 
+/// `m-volume`: how loud the music goes out to everyone now, 0 to 1.
+pub fn volume_message(volume: f32) -> Value {
+    json!({ "t": "m-volume", "v": volume })
+}
+
 /// `m-start`: the DJ actually began playing `id`. The clock then starts.
 pub fn start_message(id: &str) -> Value {
     json!({ "t": "m-start", "id": id })
@@ -454,7 +515,7 @@ pub fn start_message(id: &str) -> Value {
 pub fn handles(t: &str) -> bool {
     matches!(
         t,
-        "m-add" | "m-skip" | "m-pause" | "m-play" | "m-start" | "m-state"
+        "m-add" | "m-skip" | "m-pause" | "m-play" | "m-start" | "m-state" | "m-volume"
     )
 }
 
@@ -580,6 +641,34 @@ mod tests {
         assert!(q.apply(&start_message("x")));
         std::thread::sleep(std::time::Duration::from_millis(20));
         assert!(q.view().elapsed > 0.01, "{}", q.view().elapsed);
+    }
+
+    #[test]
+    fn the_volume_for_everyone_travels_and_reaches_late_joiners() {
+        let q = Queue::new();
+        assert_eq!(q.volume(), 1.0);
+        assert!(!q.worth_telling(), "nothing to tell yet");
+        // Someone turns it down: the message sets it here, kept in range.
+        assert!(q.apply(&volume_message(0.4)));
+        assert!((q.view().volume - 0.4).abs() < 1e-6);
+        assert!(!q.apply(&volume_message(0.4)), "no change");
+        assert!(q.set_volume(7.0));
+        assert_eq!(q.volume(), 1.0);
+        assert!(q.set_volume(0.25));
+        // With no song on, a newcomer still has to learn it.
+        assert!(q.worth_telling());
+        let later = Queue::new();
+        assert!(later.apply(&q.snapshot_message()));
+        assert!((later.volume() - 0.25).abs() < 1e-6);
+        // An older app's snapshot says nothing of it: as it comes.
+        let old = Queue::new();
+        old.set_volume(0.5);
+        assert!(old.apply(&json!({ "t": "m-state", "queue": [], "paused": false, "at": 0 })));
+        assert_eq!(old.volume(), 1.0);
+        // The queue dies with the call, and its volume with it.
+        q.clear();
+        assert_eq!(q.volume(), 1.0);
+        assert!(handles("m-volume"));
     }
 
     #[test]

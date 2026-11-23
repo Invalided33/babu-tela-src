@@ -251,7 +251,13 @@ pub(super) fn start(
                     if let Err(e) = &av1 {
                         crate::logln!("vídeo: sem AV1 na placa ({e})");
                     }
-                    let screen = match Screen::start(&gpu, &item, control.clone()) {
+                    // The shared window (0 for a whole screen), so the
+                    // capture can tell when it is minimized.
+                    let window = match source {
+                        super::sources::Source::Window(w) => w,
+                        _ => 0,
+                    };
+                    let screen = match Screen::start(&gpu, &item, control.clone(), window) {
                         Ok(s) => s,
                         Err(e) => {
                             let _ = opened.send(Err(e));
@@ -530,6 +536,10 @@ struct Slot {
     stop: AtomicBool,
     /// Textures made so far: a change in size gives the next one a new id.
     made: AtomicU64,
+    /// The shared window (0 for a whole screen): while it is minimized,
+    /// Windows draws it black, so those frames are dropped and the last
+    /// real one is kept.
+    window: isize,
 }
 
 impl Slot {
@@ -632,6 +642,7 @@ impl Screen {
         gpu: &Gpu,
         item: &GraphicsCaptureItem,
         bell: Arc<LayerControl>,
+        window: isize,
     ) -> Result<Screen, String> {
         // The frame pool draws into textures on our own device: there is
         // no cross-device copy on the way to the encoder.
@@ -663,7 +674,10 @@ impl Screen {
         // every build takes `false`, so a failure here is swallowed.
         let _ = session.SetIsBorderRequired(false);
 
-        let slot = Arc::new(Slot::default());
+        let slot = Arc::new(Slot {
+            window,
+            ..Default::default()
+        });
         let frame_slot = slot.clone();
         let gpu_arc = Arc::new(GpuHandle {
             device: gpu.device.clone(),
@@ -767,6 +781,19 @@ fn frame_arrived(
     }
     let reading = Instant::now();
     let frame = pool.TryGetNextFrame()?;
+    // A minimized window is not drawn by Windows: the frames that come
+    // then are its black iconic state. Drop them (the frame is released
+    // when it goes out of scope) and keep the last real picture, which the
+    // encoders repeat, so the share freezes on the last frame instead of
+    // going black; it comes back live when the window is restored. No
+    // capture can get live frames from a minimized window.
+    if slot.window != 0 {
+        use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
+        // SAFETY: a read-only query about a window handle.
+        if unsafe { IsIconic(slot.window as _) } != 0 {
+            return Ok(());
+        }
+    }
     let surface = frame.Surface()?;
     let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
     // SAFETY: the surface is a Direct3D11 one, and `GetInterface` casts

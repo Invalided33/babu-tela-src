@@ -36,7 +36,8 @@ Uso: cargo xtask <comando>
 
   dev [argumentos]          abre o app em modo de desenvolvimento
   servidor                  compila o servidor e publica na Cloudflare
-  release [--endereco URL]  gera build/release/Babu Tela Setup.exe
+  release [--endereco URL] [--so-instalador]
+                            gera build/release/Babu Tela Setup.exe
   release update            publica uma versão nova de uma vez: gera o
                             instalador, publica o servidor (com a lista de
                             emoji), a atualização automática dos apps e a
@@ -63,8 +64,9 @@ Uso: cargo xtask <comando>
   testar [--so-servidor] [URL]
                             testes em Rust e, depois, de ponta a ponta contra o
                             servidor publicado (num banco de teste separado)
-  chamada [--pessoas N] [--calado] [--so-tcp]
-          [--tela | --janela TÍTULO] [--segundos N]
+  chamada [--pessoas N] [--calado] [--so-tcp] [--exe CAMINHO]
+          [--tela | --placa | --janela TÍTULO | --apresentar ARQUIVO]
+          [--anotar] [--segundos N]
                             uma chamada de verdade entre 2 a 6 apps neste PC,
                             direto entre as pessoas (--calado: a última
                             fica em silêncio, e quase nada sai dela;
@@ -75,12 +77,14 @@ Uso: cargo xtask <comando>
                             apps neste PC, sem passar pelo servidor: o Beto
                             baixa, pausa na metade, continua e confere o
                             arquivo byte a byte (--so-tcp: pelo relé)
-  medir [mensagens | ocioso | voz | tela | midia | arquivos]
+  medir [mensagens ocioso figurinhas voz tela midia arquivos captura qualidades]
         [--segundos N] [--rotulo NOME] [--comparar NOME] [--env NOME=VALOR]
-        [--ruido ia|padrao|desligada]
+        [--ruido ia|padrao|desligada] [--exe CAMINHO] [--giphy]
                             mede atraso, processador e memória do app
                             otimizado neste PC, contra o servidor publicado,
-                            e guarda os números em build/medidas/
+                            e guarda os números em build/medidas/. Aceita um
+                            ou mais cenários. captura e qualidades precisam
+                            ser pedidos pelo nome
   icones                    redesenha crates/app/assets/icons/*.svg
 
 As chaves da Cloudflare ficam em build/cloudflare.json (veja o README).

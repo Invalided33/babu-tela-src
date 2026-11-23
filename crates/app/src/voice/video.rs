@@ -433,6 +433,10 @@ pub(super) struct Slot {
     /// as fresh pages each time: allocating one per picture made every
     /// picture pay for thousands of page faults.
     spare: Mutex<Vec<Vec<u8>>>,
+    /// The shared window (0 for a whole screen): while it is minimized,
+    /// Windows draws it black, so those frames are dropped and the last
+    /// real one is kept.
+    window: isize,
 }
 
 impl Slot {
@@ -603,7 +607,16 @@ fn start_cpu(again: Again) -> Result<Sending, String> {
         ref preview,
         me,
     } = again;
-    let slot = Arc::new(Slot::default());
+    // The shared window (0 for a whole screen), so the capture can tell
+    // when it is minimized.
+    let window = match source {
+        Source::Window(w) => w,
+        _ => 0,
+    };
+    let slot = Arc::new(Slot {
+        window,
+        ..Default::default()
+    });
     let kind = source.kind();
     // openh264 makes H.264 only: said before the call hears of this video
     // (the card's share before it may have said AV1).
@@ -681,6 +694,15 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for Screen {
         if self.slot.stopped() {
             control.stop();
             return Ok(());
+        }
+        // A minimized window is not drawn by Windows: its frames are black.
+        // Hold the last real picture instead; live frames return on restore.
+        if self.slot.window != 0 {
+            use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
+            // SAFETY: a read-only query about a window handle.
+            if unsafe { IsIconic(self.slot.window as _) } != 0 {
+                return Ok(());
+            }
         }
         let reading = Instant::now();
         let mut data = self.slot.buffer();

@@ -307,8 +307,8 @@ fn bring(up: &Upstream) -> Result {
     println!(
         "Modelo novo no app (revisão {}; o float16 fica {} dB abaixo do som longe do original): \
          crates/denoise/model/{SHIPPED} e o NOTICE. Antes de lançar, meça a voz de novo (cargo \
-         xtask medir voz, e a fala de verdade: veja \"Testes\" no README) e atualize os números \
-         da supressão de ruído no README.",
+         xtask medir voz e o teste de fala em docs/desenvolvimento.md) e atualize a comparação \
+         da supressão de ruído em docs/arquitetura.md.",
         short(&up.revision),
         apart.trim()
     );

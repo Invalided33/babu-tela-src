@@ -53,6 +53,9 @@ pub struct Prefs {
     /// The folder the last file someone sent was saved to: the next save
     /// dialog opens there (none: Downloads).
     pub download_dir: Option<std::path::PathBuf>,
+    /// How loud the call's music plays here, 0 to 2 (the music window's
+    /// "só para mim"; none: as it comes, 1).
+    pub music_volume: Option<f32>,
 }
 
 /// How loud one person plays on this PC: their voice and the sound of
@@ -89,6 +92,13 @@ impl PersonAudio {
 }
 
 impl Prefs {
+    /// How loud the call's music plays here, 0 to 2.
+    pub fn music_volume(&self) -> f32 {
+        self.music_volume
+            .filter(|v| v.is_finite())
+            .map_or(1.0, |v| v.clamp(0.0, 2.0))
+    }
+
     /// Reads the file; a missing or damaged one gives the defaults.
     pub fn load(path: &Path) -> Prefs {
         std::fs::read(path)
@@ -153,6 +163,7 @@ mod tests {
             tor: false,
             lang: Some(crate::lang::Lang::En),
             download_dir: Some(r"D:\Arquivos\Baixados".into()),
+            music_volume: Some(0.35),
         };
         p.save(&path);
 
@@ -170,11 +181,13 @@ mod tests {
         assert_eq!(back.noise, Some(Noise::Padrao));
         assert_eq!(back.emoji_recent, p.emoji_recent);
         assert_eq!(back.emoji_tone, 3);
+        assert_eq!(back.music_volume(), 0.35);
         // A file from before these knows nothing of them.
         std::fs::write(&path, br#"{"quality": "720p30"}"#).unwrap();
         let old = Prefs::load(&path);
         assert!(old.people.is_empty() && old.share_audio.is_none() && old.noise.is_none());
         assert!(old.emoji_recent.is_empty() && old.emoji_tone == 0);
+        assert_eq!(old.music_volume(), 1.0, "the music as it comes");
 
         std::fs::write(&path, b"{ lixo").unwrap();
         assert!(Prefs::load(&path).view.is_none());

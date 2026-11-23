@@ -21,7 +21,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{
-    AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
+    AtomicBool, AtomicI32, AtomicI64, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
 };
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -86,6 +86,26 @@ const STREAM_DELAY_MS: i32 = 50;
 pub struct Level(AtomicU32);
 
 impl Level {
+    pub fn set(&self, v: f32) {
+        self.0.store(v.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+}
+
+/// A volume stored in an atomic, as the bits of an f32: 1 (as it comes)
+/// until set.
+pub struct Volume(AtomicU32);
+
+impl Default for Volume {
+    fn default() -> Volume {
+        Volume(AtomicU32::new(1.0f32.to_bits()))
+    }
+}
+
+impl Volume {
     pub fn set(&self, v: f32) {
         self.0.store(v.to_bits(), Ordering::Relaxed);
     }
@@ -195,6 +215,18 @@ impl PeerAudio {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .len()
+    }
+
+    /// The samples queued, for the music tests, which check how loud the
+    /// DJ's own copy is.
+    #[cfg(test)]
+    pub fn queued_samples(&self) -> Vec<f32> {
+        self.buf
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect()
     }
 
     /// A packet stamped `timestamp` (RTP, 48 kHz) with `samples` of sound
@@ -368,6 +400,16 @@ pub struct AudioShared {
     /// only then.
     gains: Mutex<HashMap<i64, Gains>>,
     gains_changed: AtomicU64,
+    /// Whose screen's sound is the call's music now: the DJ's, who adds it
+    /// to the same track (0 for nobody). And how loud the music plays here
+    /// (the music window's "só para mim"), on top of that person's screen
+    /// volume. A screen shared with sound by the DJ at the same time goes
+    /// with it: on the way in, the two are one sound.
+    pub music_from: AtomicI64,
+    pub music_volume: Volume,
+    /// How loud the music played here in the last mixing step (RMS, after
+    /// both volumes), for the tests' report.
+    pub music_level: Level,
     /// Packets sent to and received from the others, for the smoke test
     /// and for telling a silent call from a broken one.
     pub sent: AtomicU64,
@@ -1302,9 +1344,18 @@ impl Playback {
             }
         }
         let mut screen = [0f32; 2 * CHUNK];
+        let music_from = self.shared.music_from.load(Ordering::Relaxed);
         if let Ok(screens) = self.shared.screens.try_lock() {
             for (uid, p) in screens.iter() {
-                p.pull(&mut screen, at_ms, gain(uid).screen);
+                let mut g = gain(uid).screen;
+                let music = *uid == music_from;
+                if music {
+                    g *= self.shared.music_volume.get();
+                }
+                p.pull(&mut screen, at_ms, g);
+                if music {
+                    self.shared.music_level.set(p.level.get() * g);
+                }
             }
         }
         let (mut left, mut right) = ([0f32; CHUNK], [0f32; CHUNK]);
@@ -1837,6 +1888,37 @@ mod tests {
         shared.deaf.store(true, Ordering::Relaxed);
         let (left, right) = playback.mix_chunk(0.0);
         assert!(left.iter().chain(&right).all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn the_music_plays_as_loud_as_set_here_and_only_the_djs_sound() {
+        let shared = Arc::new(AudioShared::default());
+        assert_eq!(shared.music_volume.get(), 1.0, "as it comes until set");
+        // Person 3 plays a song (at half their screen volume here), person
+        // 4 shares a screen with sound.
+        let three: Vec<f32> = (0..PRIME).flat_map(|_| [0.4, -0.4]).collect();
+        let four: Vec<f32> = (0..PRIME).flat_map(|_| [0.2, 0.2]).collect();
+        shared.screen_peer(3).push(&three);
+        shared.screen_peer(4).push(&four);
+        shared.set_gains(
+            3,
+            Gains {
+                voice: 1.0,
+                screen: 0.5,
+            },
+        );
+        shared.music_from.store(3, Ordering::Relaxed);
+        shared.music_volume.set(0.5);
+        let mut playback = playback_with(&shared, 2);
+        playback.gains = HashMap::from([(3, shared.gains(3))]);
+        let (left, right) = playback.mix_chunk(0.0);
+        // 0.4 × 0.5 × 0.5 from the song, 0.2 from person 4 as it comes.
+        assert!((left[0] - (0.1 + 0.2)).abs() < 1e-6, "{}", left[0]);
+        assert!((right[0] - (-0.1 + 0.2)).abs() < 1e-6, "{}", right[0]);
+        // Turned all the way down: only person 4's sound is left.
+        shared.music_volume.set(0.0);
+        let (left, _) = playback.mix_chunk(0.0);
+        assert!((left[0] - 0.2).abs() < 1e-6, "{}", left[0]);
     }
 
     #[test]

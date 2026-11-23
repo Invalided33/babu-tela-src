@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Babu Tela — baixar para Windows</title>
-<meta name="description" content="Babu Tela: chat de comunidades com texto, voz e vídeo, para Windows.">
+<meta name="description" content="Baixe o Babu Tela para Windows 10 ou 11 (64 bits) e converse por texto, voz e vídeo com sua comunidade.">
 <link rel="icon" href="icone.png">
 <style>
   :root { --bg0: #0d0c1d; --bg2: #1a1939; --text: #ecebff; --muted: #a3a2c9; --faint: #716f9f; --a: #a6b0ff; --b: #6c78f4; }
@@ -40,19 +40,21 @@
 <main>
   <img class="logo" src="icone.png" alt="">
   <h1>Babu Tela</h1>
-  <p class="lead">Chat de comunidades com texto, voz e vídeo.</p>
+  <p class="lead">Converse por texto, entre em uma chamada e compartilhe sua tela com a comunidade.</p>
   <a class="baixar" href="{{DOWNLOAD}}">Baixar para Windows</a>
   <div class="meta">Versão {{VERSAO}} · {{TAMANHO}} · {{DATA}}</div>
   <ul>
-    <li>Entre com a sua conta do Google, sem criar senha.</li>
-    <li>Chamadas de voz e vídeo e compartilhamento de tela, direto entre as pessoas.</li>
-    <li>Depois de instalado, o app se atualiza sozinho.</li>
+    <li>Abra o instalador e entre no app com sua conta do Google.</li>
+    <li>Envie mensagens e anexos com criptografia de ponta a ponta.</li>
+    <li>Durante a chamada, compartilhe uma janela, apresente slides ou monte uma fila de músicas do YouTube e do SoundCloud.</li>
+    <li>O app instalado verifica e baixa as atualizações assinadas do Babu Tela.</li>
   </ul>
   <details>
-    <summary>O Windows avisou que o app não é reconhecido?</summary>
-    <p>O instalador ainda não tem assinatura digital, então o Windows (SmartScreen) pode avisar
-      na primeira vez. Clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.</p>
-    <p>Para conferir que o arquivo baixado é o original, o SHA-256 dele é:<br><code>{{SHA256}}</code></p>
+    <summary>Como conferir o instalador baixado?</summary>
+    <p>O Windows SmartScreen pode mostrar um aviso porque o instalador não tem assinatura de editor para Windows.
+      Na pasta do download, abra o PowerShell e execute <code>Get-FileHash -Algorithm SHA256 .\Babu-Tela-Setup.exe</code>.
+      Compare o valor de <b>Hash</b> com o SHA-256 desta versão antes de abrir o arquivo.</p>
+    <p><code>{{SHA256}}</code></p>
   </details>
   <footer>Para Windows 10 e 11 (64 bits).</footer>
 </main>

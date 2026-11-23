@@ -1062,6 +1062,24 @@ impl Voice {
         self.shared.gains(uid)
     }
 
+    /// How loud the call's music plays here, 0 to 2 (in this and every
+    /// later call), on top of the DJ's screen volume.
+    pub fn set_music_volume(&self, volume: f32) {
+        self.shared.music_volume.set(volume.clamp(0.0, 2.0));
+    }
+
+    /// How loud the music played here a moment ago (RMS, after both
+    /// volumes; 0 when none plays), and the raw level of whose sound is the
+    /// music, for the tests' report.
+    pub fn music_level(&self) -> (f32, i64) {
+        (
+            self.shared.music_level.get(),
+            self.shared
+                .music_from
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
     /// Whose screens' sound does not come here: those silenced, and those
     /// not watched.
     fn unheard_screens(&self) -> HashSet<i64> {

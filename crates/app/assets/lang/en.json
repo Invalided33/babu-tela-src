@@ -552,6 +552,10 @@
   "music.add": "Add",
   "music.link_help": "Only youtube.com, youtu.be or soundcloud.com links. The video doesn't go; only the audio.",
   "music.added_by": "added by {name}",
+  "music.volume_all": "Volume for everyone",
+  "music.volume_me": "Volume just for me",
+  "music.volume_help": "“For everyone” changes the music volume for the whole call. “Just for me” changes it only on this PC.",
+  "music.searching_many": "Searching {n} songs…",
 
   "player.cant_play_video": "This video can't play here.\nClick to open it in the browser.",
   "player.pause": "Pause",
@@ -647,7 +651,6 @@
   "main.window_failed": "Babu Tela couldn't open the window.\n\n{e}\n\nIf the problem continues, update your video driver and try again.",
 
   "music.only_links": "Only YouTube and SoundCloud links.",
-  "music.already_fetching": "Already fetching another song. Hold on a moment.",
   "music.read_failed": "Couldn't read the song: {e}",
   "music.stopped": "Music stopped: {e}",
   "music.youtube_login": "YouTube asked for a login. Sign in to YouTube in Chrome, Edge, Firefox, Brave, Opera or Vivaldi and try again ({detail}).",

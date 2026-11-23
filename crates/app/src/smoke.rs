@@ -424,6 +424,17 @@ impl Smoke {
             let whole = core.direct.report()["completed"].as_u64().unwrap_or(0);
             return self.hold_while(secs, 600, whole < n.parse().unwrap_or(1));
         }
+        // wait-musica:<seconds>: the song at the head of the queue plays
+        // (or no link is being read and the queue is empty: it failed).
+        if let Some(secs) = step.strip_prefix("wait-musica:") {
+            let view = core.music.view();
+            let waiting = if view.items.is_empty() {
+                core.music.extracting() > 0
+            } else {
+                view.elapsed <= 0.0
+            };
+            return self.hold_while(secs, 120, waiting);
+        }
         // wait-salvo:<seconds>: every file saved with "Baixar" is down (or
         // failed).
         if let Some(secs) = step.strip_prefix("wait-salvo:") {
@@ -443,6 +454,18 @@ impl Smoke {
         }
         self.holding = None;
         false
+    }
+
+    /// The call's music as this copy has it: the queue, the volume for
+    /// everyone and mine, how loud it plays here, and how long the last
+    /// song added here took.
+    fn music_report(&self, core: &Core) -> serde_json::Value {
+        let mut music = core.music.report();
+        let (level, from) = core.voice.music_level();
+        music["mine"] = json!(core.music_volume());
+        music["level"] = json!(level);
+        music["from"] = json!(from);
+        music
     }
 
     /// Holds the run while `waiting`, for at most `secs` seconds (`default`
@@ -505,6 +528,24 @@ impl Smoke {
                     });
                 }
             }
+            // musica:<link>: the link pasted in the music window (the call
+            // must be on); volume-todos:<percent> and volume-meu:<percent>:
+            // its two sliders.
+            ("musica", link) => {
+                let name = core
+                    .me
+                    .as_ref()
+                    .map(|m| m.name().to_owned())
+                    .unwrap_or_default();
+                core.music.add_url(link.to_owned(), name);
+            }
+            ("volume-todos", pct) => {
+                core.music
+                    .set_volume(pct.parse::<f32>().unwrap_or(100.0) / 100.0);
+            }
+            ("volume-meu", pct) => {
+                core.set_music_volume(pct.parse::<f32>().unwrap_or(100.0) / 100.0, true);
+            }
             ("join", _) => {
                 let target = core.current_server().and_then(|s| {
                     s.channels
@@ -528,6 +569,7 @@ impl Smoke {
                 };
             }
             ("open", "settings") => core.open_settings(),
+            ("open", "music") => core.open_music(),
             // "Continuar com o Google" on the sign-in card. With
             // BABUTELA_GOOGLE_AUTH_URL, a fake Google answers instead of the
             // browser (google.rs).
@@ -717,7 +759,7 @@ impl Smoke {
             // nothing left to do once they get here.
             (
                 "wait-sent" | "burst" | "until" | "wait-anims" | "wait-emoji" | "wait-direto-msg"
-                | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo",
+                | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo" | "wait-musica",
                 _,
             ) => {}
             // direto:on|off: the composer's "Enviar direto", for the files
@@ -1281,9 +1323,11 @@ impl Smoke {
             // call whose people leave before the end.
             ("note", label) => {
                 let people = core.voice_location().map(|(s, c)| s.in_voice(c.id).len());
+                let music = self.music_report(core);
                 self.notes.insert(
                     label.to_owned(),
                     json!({
+                        "music": music,
                         "voiceStats": core.voice.stats(),
                         "voiceCall": core.voice.report(),
                         "voicePeople": people,
@@ -1577,6 +1621,7 @@ impl Smoke {
             .hwnd()
             .map_or(serde_json::Value::Null, crate::winsys::geometry);
         report["noise"] = core.voice.noise_report();
+        report["music"] = self.music_report(core);
         report["slides"] = core.voice.slides().report();
         report["direct"] = core.direct.report();
         report["directSend"] = json!(core.direct_send);

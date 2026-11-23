@@ -1001,6 +1001,7 @@ impl Core {
                 voice.set_gains(uid, p.gains());
             }
         }
+        voice.set_music_volume(prefs.music_volume());
         crate::media::sweep();
         let media = crate::media::Media::new(rt.clone(), api.clone(), sounds.clone(), ctx.clone());
         let direct = crate::direct::Direct::new(
@@ -3131,15 +3132,18 @@ impl Core {
         self.modal = None;
     }
 
-    /// The picker of screens and windows. Their pictures are taken on a
-    /// thread of their own and arrive one by one.
+    /// The music window. The programs that read the links get ready while
+    /// it is open, so the first link pasted does not wait for them.
     pub fn open_music(&mut self) {
         self.open_modal(Modal::Music {
             link: String::new(),
         });
         self.modal_focus = true;
+        self.music.prepare();
     }
 
+    /// The picker of screens and windows. Their pictures are taken on a
+    /// thread of their own and arrive one by one.
     pub fn open_share(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
         let own = self.shell.hwnd();
@@ -4080,6 +4084,22 @@ impl Core {
             self.prefs.people.insert(uid.to_string(), audio);
         }
         self.voice.set_gains(uid, audio.gains());
+        if keep {
+            self.save_prefs();
+        }
+    }
+
+    /// How loud the call's music plays here (0 to 2).
+    pub fn music_volume(&self) -> f32 {
+        self.prefs.music_volume()
+    }
+
+    /// Sets how loud the call's music plays here, at once (only on this
+    /// PC). `keep` writes it down too (not on every step of the slider).
+    pub fn set_music_volume(&mut self, volume: f32, keep: bool) {
+        let volume = volume.clamp(0.0, 2.0);
+        self.prefs.music_volume = ((volume - 1.0).abs() > f32::EPSILON).then_some(volume);
+        self.voice.set_music_volume(volume);
         if keep {
             self.save_prefs();
         }

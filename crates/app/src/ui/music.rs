@@ -30,9 +30,35 @@ pub fn modal(ui: &mut Ui, core: &mut Core, link: &mut String, focus: bool, acts:
             .request_repaint_after(std::time::Duration::from_millis(200));
     }
     now_playing(ui, &view, acts, core);
+    if in_call {
+        volumes(ui, core, &view, acts);
+    }
     coming_up(ui, &view, acts, core);
     ui.add_space(10.0);
     link_row(ui, core, link, focus, in_call, extracting, acts);
+}
+
+/// The music's two volumes: for everyone in the call (the DJ sends it that
+/// loud), and only for me (this PC plays it that loud).
+fn volumes(ui: &mut Ui, core: &Core, view: &View, acts: &mut Acts) {
+    ui.add_space(8.0);
+    let width = ui.available_width();
+    if let Some((v, _)) =
+        super::modals::slider(ui, width, t!("music.volume_all"), view.volume, 1.0, false)
+    {
+        acts.later(move |c| c.music.set_volume(v));
+    }
+    if let Some((v, done)) = super::modals::slider(
+        ui,
+        width,
+        t!("music.volume_me"),
+        core.music_volume(),
+        2.0,
+        false,
+    ) {
+        acts.later(move |c| c.set_music_volume(v, done));
+    }
+    widgets::sub(ui, t!("music.volume_help"));
 }
 
 fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
@@ -51,16 +77,15 @@ fn now_playing(ui: &mut Ui, view: &View, acts: &mut Acts, core: &Core) {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
+                    // Room for the two buttons at the right: a long title
+                    // ends in "…" instead of running under them.
+                    ui.set_width(ui.available_width() - 80.0);
                     ui.label(
                         egui::RichText::new(t!("music.now_playing"))
                             .font(theme::small())
                             .color(ACCENT),
                     );
-                    ui.label(
-                        egui::RichText::new(&item.title)
-                            .font(theme::bold(15.0))
-                            .color(TEXT),
-                    );
+                    widgets::ellipsis(ui, &item.title, theme::bold(15.0), TEXT);
                     let subtitle = subtitle_for(item);
                     if !subtitle.is_empty() {
                         ui.label(
@@ -189,7 +214,7 @@ fn link_row(
     link: &mut String,
     focus: bool,
     in_call: bool,
-    extracting: bool,
+    extracting: usize,
     acts: &mut Acts,
 ) {
     ui.horizontal(|ui| {
@@ -208,19 +233,16 @@ fn link_row(
         if focus {
             resp.request_focus();
         }
+        // Another link can go in while one is being read: they enter the
+        // queue in the order pasted.
         let submit = in_call
-            && !extracting
             && !link.trim().is_empty()
             && (ui.input(|i| i.key_pressed(Key::Enter))
                 || resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
-        if Button::primary(if extracting {
-            t!("music.searching")
-        } else {
-            t!("music.add")
-        })
-        .enabled(in_call && !extracting && !link.trim().is_empty())
-        .show(ui)
-        .clicked()
+        if Button::primary(t!("music.add"))
+            .enabled(in_call && !link.trim().is_empty())
+            .show(ui)
+            .clicked()
             || submit
         {
             let name = core
@@ -233,6 +255,11 @@ fn link_row(
         }
     });
     ui.add_space(2.0);
+    match extracting {
+        0 => {}
+        1 => widgets::sub(ui, t!("music.searching")),
+        n => widgets::sub(ui, &tf!("music.searching_many", n = n)),
+    }
     widgets::sub(ui, t!("music.link_help"));
     ui.horizontal(|ui| {
         if Button::ghost(t!("common.close")).show(ui).clicked() {

@@ -6,6 +6,10 @@
 //!
 //! No server is involved: the song itself goes peer to peer, encrypted end
 //! to end along with the voice.
+//!
+//! Two volumes: the queue's, for everyone (the DJ turns the song down
+//! before it goes out, `m-volume`), and each one's own, on this PC only
+//! (the speaker turns down the DJ's sound, voice/audio.rs `music_volume`).
 
 pub mod extractor;
 pub mod queue;
@@ -13,13 +17,13 @@ pub mod stream;
 pub mod ytdlp;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub use self::queue::{DjAction, Item, Queue, State, View, handles};
@@ -57,13 +61,14 @@ pub struct Music {
     screen_packets: Mutex<Option<UnboundedSender<crate::voice::audio::Packet>>>,
 
     /// How to tell the call to add the screen audio track to each peer
-    /// (`Cmd::ScreenAudio(true)` when music starts, `(false)` on stop).
+    /// (`Cmd::ScreenAudio(true)` when music starts).
     cmds: Mutex<Option<UnboundedSender<crate::voice::rtc::Cmd>>>,
 
     /// The call's shared audio state. The music player pushes the decoded
     /// PCM into `screen_peer(me)` so the DJ hears the song too (there is
     /// no Windows playback in the middle, and the remote peers get it
-    /// through `screen_packets`, not through this).
+    /// through `screen_packets`, not through this). The speaker learns
+    /// from it whose sound is the music (`music_from`).
     audio: Mutex<Option<Arc<crate::voice::audio::AudioShared>>>,
 
     /// A background task that watches the queue and starts or stops the
@@ -79,9 +84,32 @@ pub struct Music {
     /// Bumped whenever anything the UI shows may have changed.
     generation: AtomicU64,
 
-    /// A toast is sent after each failed extraction, with the actual error.
-    extracting: AtomicBool,
+    /// Bumped as each call starts and ends: a song still being read when
+    /// its call ended goes nowhere.
+    call: AtomicU64,
+
+    /// Links being read now (several can be, each its own yt-dlp).
+    extracting: AtomicUsize,
+
+    /// Links pasted go into the queue in the order they were pasted, even
+    /// when a later one is read first: each takes a number, and waits for
+    /// `order` to reach it.
+    tickets: AtomicU64,
+    order: tokio::sync::watch::Sender<u64>,
+
+    /// How long the last song added here took (for the tests' report).
+    timing: Mutex<Timing>,
     ctx: egui::Context,
+}
+
+/// How long the last song added on this PC took, in milliseconds from the
+/// link pasted: until everyone had it in their queue, and until it played.
+#[derive(Clone, Copy, Debug, Default)]
+struct Timing {
+    pasted: Option<Instant>,
+    queued_ms: Option<f64>,
+    playing_ms: Option<f64>,
+    fast: Option<bool>,
 }
 
 /// What the local player holds while the DJ is this PC.
@@ -113,13 +141,17 @@ impl Music {
             dj: Mutex::new(None),
             cached: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
-            extracting: AtomicBool::new(false),
+            call: AtomicU64::new(0),
+            extracting: AtomicUsize::new(0),
+            tickets: AtomicU64::new(0),
+            order: tokio::sync::watch::Sender::new(0),
+            timing: Mutex::new(Timing::default()),
             ctx,
         })
     }
 
-    /// true while a yt-dlp extraction is running, so the UI can show "aguarde".
-    pub fn extracting(&self) -> bool {
+    /// How many links are being read now, so the UI can say "Buscando…".
+    pub fn extracting(&self) -> usize {
         self.extracting.load(Ordering::Relaxed)
     }
 
@@ -129,6 +161,13 @@ impl Music {
 
     pub fn view(&self) -> View {
         self.queue.view()
+    }
+
+    /// The music window opened: the programs that read the links get ready
+    /// meanwhile (downloaded the first time), so the first link pasted does
+    /// not wait for them.
+    pub fn prepare(&self) {
+        ytdlp::prewarm(&self.rt);
     }
 
     /// Called by Voice when the local user joins a call. The music module
@@ -145,6 +184,7 @@ impl Music {
         cmds: UnboundedSender<crate::voice::rtc::Cmd>,
         audio: Arc<crate::voice::audio::AudioShared>,
     ) {
+        self.call.fetch_add(1, Ordering::SeqCst);
         self.me.store(me, Ordering::Relaxed);
         *self.outgoing.lock().unwrap_or_else(PoisonError::into_inner) = Some(outgoing);
         *self
@@ -152,6 +192,7 @@ impl Music {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(screen_packets);
         *self.cmds.lock().unwrap_or_else(PoisonError::into_inner) = Some(cmds);
+        audio.music_from.store(0, Ordering::Relaxed);
         *self.audio.lock().unwrap_or_else(PoisonError::into_inner) = Some(audio);
         self.generation.fetch_add(1, Ordering::Relaxed);
         self.ctx.request_repaint();
@@ -160,6 +201,7 @@ impl Music {
     /// Called by Voice when the user leaves the call: the queue is cleared,
     /// the DJ task (if any) is cancelled, and nothing new is posted.
     pub fn deactivate(self: &Arc<Music>) {
+        self.call.fetch_add(1, Ordering::SeqCst);
         self.me.store(0, Ordering::Relaxed);
         *self.outgoing.lock().unwrap_or_else(PoisonError::into_inner) = None;
         *self
@@ -167,7 +209,14 @@ impl Music {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = None;
         *self.cmds.lock().unwrap_or_else(PoisonError::into_inner) = None;
-        *self.audio.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        if let Some(audio) = self
+            .audio
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            audio.music_from.store(0, Ordering::Relaxed);
+        }
         self.stop_dj();
         self.cached
             .lock()
@@ -188,9 +237,12 @@ impl Music {
         }
     }
 
-    /// `m-state` for a late joiner (sent to one person).
-    pub fn snapshot(&self) -> Value {
-        self.queue.snapshot_message()
+    /// `m-state` for someone who just joined (sent to one person), when
+    /// there is anything to tell: songs, or a volume turned down.
+    pub fn snapshot(&self) -> Option<Value> {
+        self.queue
+            .worth_telling()
+            .then(|| self.queue.snapshot_message())
     }
 
     /// A music message arrived from someone else: apply it, and update the
@@ -203,7 +255,8 @@ impl Music {
     }
 
     /// Pastes a link in: validates it, runs yt-dlp, and posts the song to
-    /// everyone (and adds it locally).
+    /// everyone (and adds it locally). Several links can be read at once;
+    /// they go into the queue in the order they were pasted.
     pub fn add_url(self: &Arc<Music>, url: String, by_name: String) {
         let me = self.me.load(Ordering::Relaxed);
         if me == 0 {
@@ -214,32 +267,53 @@ impl Music {
             (self.toast)(crate::t!("music.only_links").into());
             return;
         }
-        if self.extracting.swap(true, Ordering::Relaxed) {
-            (self.toast)(crate::t!("music.already_fetching").into());
-            return;
-        }
+        let call = self.call.load(Ordering::SeqCst);
+        let ticket = self.tickets.fetch_add(1, Ordering::SeqCst);
+        let pasted = Instant::now();
+        self.extracting.fetch_add(1, Ordering::Relaxed);
+        self.ctx.request_repaint();
         let this = self.clone();
         self.rt.spawn(async move {
-            let res = this.extract_and_post(url, by_name, me).await;
-            this.extracting.store(false, Ordering::Relaxed);
-            if let Err(e) = res {
-                (this.toast)(crate::tf!("music.read_failed", e = e));
+            let read = this.read_song(url, by_name, me).await;
+            // The ones pasted before go in first.
+            let mut turn = this.order.subscribe();
+            let _ = turn.wait_for(|next| *next >= ticket).await;
+            this.extracting.fetch_sub(1, Ordering::Relaxed);
+            match read {
+                // The call this was pasted in is over: it goes nowhere.
+                Ok(_) if this.call.load(Ordering::SeqCst) != call => {}
+                Ok((item, extracted)) => {
+                    {
+                        let mut t = this.timing.lock().unwrap_or_else(PoisonError::into_inner);
+                        *t = Timing {
+                            pasted: Some(pasted),
+                            queued_ms: Some(pasted.elapsed().as_secs_f64() * 1000.0),
+                            playing_ms: None,
+                            fast: Some(extracted.fast),
+                        };
+                    }
+                    this.post(item, extracted);
+                }
+                Err(e) => (this.toast)(crate::tf!("music.read_failed", e = e)),
             }
+            this.order
+                .send_modify(|next| *next = (*next).max(ticket + 1));
             this.ctx.request_repaint();
         });
     }
 
-    async fn extract_and_post(
+    /// Runs yt-dlp on `url`: the song as the queue shows it, and what to
+    /// play it from.
+    async fn read_song(
         self: &Arc<Music>,
         url: String,
         by_name: String,
         me: i64,
-    ) -> Result<(), String> {
+    ) -> Result<(Item, extractor::Extracted), String> {
         let tools = ytdlp::ensure().await?;
         let extracted = extractor::extract(&url, &tools).await?;
-        let id = format!("{}-{:016x}", me, rand_id());
         let item = Item {
-            id: id.clone(),
+            id: format!("{}-{:016x}", me, rand_id()),
             url,
             title: extracted.title.clone(),
             uploader: extracted.uploader.clone(),
@@ -248,12 +322,17 @@ impl Music {
             by: me,
             by_name,
         };
+        Ok((item, extracted))
+    }
+
+    /// Puts a song read here in the queue, here and for everyone.
+    fn post(self: &Arc<Music>, item: Item, extracted: extractor::Extracted) {
         // Keep what yt-dlp said around for `start_dj`, so it does not
         // have to run yt-dlp a second time for the same song.
         self.cached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, extracted);
+            .insert(item.id.clone(), extracted);
         // Add locally first (so a slow send to a peer does not block it),
         // then post to all.
         if self.queue.add(item.clone()) {
@@ -261,7 +340,6 @@ impl Music {
         }
         self.broadcast(queue::add_message(&item));
         self.ctx.request_repaint();
-        Ok(())
     }
 
     /// Removes the song whose id matches, locally and over the network.
@@ -289,6 +367,32 @@ impl Music {
         }
     }
 
+    /// How loud the music goes out to everyone, 0 to 1 ("para todos"). The
+    /// DJ's player follows within 10 ms.
+    pub fn set_volume(self: &Arc<Music>, volume: f32) {
+        if self.queue.set_volume(volume) {
+            self.broadcast(queue::volume_message(self.queue.volume()));
+            self.ctx.request_repaint();
+        }
+    }
+
+    /// The music as the tests' report shows it.
+    pub fn report(&self) -> Value {
+        let view = self.queue.view();
+        let t = *self.timing.lock().unwrap_or_else(PoisonError::into_inner);
+        json!({
+            "queue": view.items.iter().map(|i| i.title.clone()).collect::<Vec<_>>(),
+            "dj": view.dj,
+            "playing": view.elapsed > 0.0,
+            "elapsed": view.elapsed,
+            "volume": view.volume,
+            "extracting": self.extracting(),
+            "lastQueuedMs": t.queued_ms,
+            "lastPlayingMs": t.playing_ms,
+            "lastFast": t.fast,
+        })
+    }
+
     /// A snapshot to a specific uid (used when a new person joins).
     fn broadcast(&self, msg: Value) {
         let Some(out) = self
@@ -303,11 +407,26 @@ impl Music {
         let _ = out.send(Outgoing { to: None, msg });
     }
 
+    /// Tells the speaker whose sound is the music now: the DJ's, that of
+    /// whoever added the song at the head of the queue.
+    fn publish_dj(&self) {
+        if let Some(audio) = self
+            .audio
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            let dj = self.queue.now_playing().map_or(0, |item| item.by);
+            audio.music_from.store(dj, Ordering::Relaxed);
+        }
+    }
+
     /// Looks at the queue and either starts, pauses or stops the local
     /// player. A pause only flips a flag on the player task: the yt-dlp
     /// extraction and the download stay in memory, so resuming picks up
     /// where it stopped.
     fn sync_dj(self: &Arc<Music>) {
+        self.publish_dj();
         let me = self.me.load(Ordering::Relaxed);
         if me == 0 {
             self.stop_dj();
@@ -438,9 +557,25 @@ impl Music {
                     id_for_encoder,
                 );
             });
-            let r = stream::play(extracted, pcm_tx, stop_for_task.clone()).await;
-            if let Err(e) = r {
+            let mut played = stream::play(extracted, pcm_tx.clone(), stop_for_task.clone()).await;
+            // Not a sound came: the fast way's audio was refused, or the
+            // link waited in the queue long enough for its address to run
+            // out. yt-dlp's own way, once more, from the start.
+            if let Err(e) = &played
+                && !stop_for_task.load(Ordering::Relaxed)
+            {
+                crate::logln!("música: {e}; lendo o link de novo");
+                played = match extractor::extract_full(&item.url, &tools).await {
+                    Ok(again) => stream::play(again, pcm_tx.clone(), stop_for_task.clone()).await,
+                    Err(e) => Err(e),
+                };
+            }
+            drop(pcm_tx);
+            if let Err(e) = &played
+                && !stop_for_task.load(Ordering::Relaxed)
+            {
                 crate::logln!("música: {e}");
+                (this.toast)(crate::tf!("music.stopped", e = e));
             }
             // Wait for the encoder to drain so a quick-ending song is
             // heard whole before the queue moves on.
@@ -488,6 +623,14 @@ impl Music {
     /// The DJ's player just sent its first PCM chunk out: the elapsed
     /// clock starts now, locally and for everyone else.
     fn start_playing_locally(self: &Arc<Music>, id: &str) {
+        {
+            let mut t = self.timing.lock().unwrap_or_else(PoisonError::into_inner);
+            if t.playing_ms.is_none()
+                && let Some(pasted) = t.pasted
+            {
+                t.playing_ms = Some(pasted.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
         if self.queue.start_playing(id) {
             self.broadcast(queue::start_message(id));
             self.ctx.request_repaint();
@@ -495,9 +638,25 @@ impl Music {
     }
 }
 
+/// Turns 10 ms of interleaved stereo from volume `from` to `to`, gliding
+/// over it so a change makes no click.
+fn turn(samples: &mut [f32], from: f32, to: f32) {
+    if from == 1.0 && to == 1.0 {
+        return;
+    }
+    let frames = (samples.len() / 2).max(1) as f32;
+    for (i, frame) in samples.chunks_mut(2).enumerate() {
+        let g = from + (to - from) * (i as f32 + 1.0) / frames;
+        for s in frame {
+            *s *= g;
+        }
+    }
+}
+
 /// The encoder's own loop: paces the output at real time (with the lead
-/// burst), gates on pause (keeps the song in memory while paused), and
-/// starts the elapsed clock on the first chunk that goes out.
+/// burst), gates on pause (keeps the song in memory while paused), starts
+/// the elapsed clock on the first chunk that goes out, and turns the song
+/// to the volume everyone set (the queue's).
 fn paced_encoder(
     screen_packets: UnboundedSender<crate::voice::audio::Packet>,
     pcm_rx: &mut tokio::sync::mpsc::Receiver<Pcm>,
@@ -507,7 +666,6 @@ fn paced_encoder(
     music: Arc<Music>,
     item_id: String,
 ) {
-    use std::time::{Duration, Instant};
     const LEAD: Duration = Duration::from_millis(stream::LEAD_CHUNKS * stream::CHUNK_MS);
     const CHUNK: Duration = Duration::from_millis(stream::CHUNK_MS);
     let mut encoder = match crate::voice::audio::ScreenEncoder::new(screen_packets) {
@@ -518,13 +676,14 @@ fn paced_encoder(
         }
     };
     let mut started = false;
+    let mut volume = music.queue.volume();
     // `send_at` is when the next chunk should leave. The first `LEAD`
     // chunks go immediately (negative deadline), priming the mixer.
     let mut send_at = Instant::now()
         .checked_sub(LEAD)
         .unwrap_or_else(Instant::now);
     let mut was_paused = false;
-    while let Some(chunk) = pcm_rx.blocking_recv() {
+    while let Some(mut chunk) = pcm_rx.blocking_recv() {
         if stop.load(Ordering::Relaxed) {
             return;
         }
@@ -552,6 +711,9 @@ fn paced_encoder(
             started = true;
             music.start_playing_locally(&item_id);
         }
+        let wanted = music.queue.volume();
+        turn(&mut chunk.samples, volume, wanted);
+        volume = wanted;
         local.push(&chunk.samples);
         encoder.feed(&chunk.samples, Instant::now());
     }
@@ -692,5 +854,111 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         let _ = player.join();
         let _ = feeder.join();
+    }
+
+    #[test]
+    fn a_volume_change_glides_over_the_chunk() {
+        let mut same = vec![0.5f32; 8];
+        turn(&mut same, 1.0, 1.0);
+        assert!(same.iter().all(|&s| s == 0.5), "left as it comes");
+        let mut half = vec![0.5f32; 8];
+        turn(&mut half, 0.5, 0.5);
+        assert!(half.iter().all(|&s| (s - 0.25).abs() < 1e-6));
+        // Down from 1 to 0 over 4 stereo frames: both sides of a frame
+        // alike, each frame quieter, the last at 0.
+        let mut down = vec![1.0f32; 8];
+        turn(&mut down, 1.0, 0.0);
+        assert_eq!(down, [0.75, 0.75, 0.5, 0.5, 0.25, 0.25, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn the_dj_sends_the_music_as_loud_as_everyone_set_it() {
+        let (music, audio, _rt) = a_music();
+        music.set_volume(0.5);
+        let local = audio.screen_peer(5);
+        let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Pcm>(500);
+        let (sp_tx, _sp_rx) = unbounded_channel::<Packet>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
+        let feeder = std::thread::spawn(move || {
+            for _ in 0..12 {
+                if pcm_tx.blocking_send(loud_chunk()).is_err() {
+                    break;
+                }
+            }
+        });
+        paced_encoder(
+            sp_tx,
+            &mut pcm_rx,
+            &stop,
+            &paused,
+            &local,
+            music.clone(),
+            "song".into(),
+        );
+        feeder.join().unwrap();
+        // What the DJ hears is what went out: 0.3 at half.
+        let heard = local.queued_samples();
+        assert!(!heard.is_empty());
+        assert!(
+            heard.iter().all(|s| (s.abs() - 0.15).abs() < 1e-6),
+            "{:?}",
+            &heard[..4]
+        );
+        // Everyone learns it, and the speaker knows whose sound is the
+        // song.
+        assert_eq!(music.view().volume, 0.5);
+        music.post(
+            Item {
+                id: "5-a".into(),
+                url: "https://youtu.be/a".into(),
+                title: "a".into(),
+                uploader: None,
+                duration: None,
+                service: "YouTube".into(),
+                by: 7,
+                by_name: "x".into(),
+            },
+            extractor::Extracted {
+                service: extractor::Service::YouTube,
+                title: "a".into(),
+                uploader: None,
+                duration: None,
+                stream_url: String::new(),
+                ext: String::new(),
+                hls: false,
+                available_at: None,
+                fast: true,
+            },
+        );
+        assert_eq!(audio.music_from.load(Ordering::Relaxed), 7);
+        music.deactivate();
+        assert_eq!(audio.music_from.load(Ordering::Relaxed), 0);
+        assert_eq!(music.view().volume, 1.0, "the next call starts as it comes");
+    }
+
+    #[test]
+    fn links_go_in_in_the_order_they_were_pasted() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let order = tokio::sync::watch::Sender::new(0u64);
+        let done = Arc::new(Mutex::new(Vec::new()));
+        // The second one is read first; the first one still goes first.
+        let mut tasks = Vec::new();
+        for (ticket, ms) in [(0u64, 120u64), (1, 10), (2, 60)] {
+            let (order, done) = (order.clone(), done.clone());
+            tasks.push(rt.spawn(async move {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+                let mut turn = order.subscribe();
+                let _ = turn.wait_for(|next| *next >= ticket).await;
+                done.lock().unwrap().push(ticket);
+                order.send_modify(|next| *next = (*next).max(ticket + 1));
+            }));
+        }
+        rt.block_on(async {
+            for t in tasks {
+                t.await.unwrap();
+            }
+        });
+        assert_eq!(*done.lock().unwrap(), [0, 1, 2]);
     }
 }

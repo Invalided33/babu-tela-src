@@ -2356,7 +2356,22 @@ pub(super) fn menu_check(ui: &mut Ui, text: &str, on: bool) -> bool {
 /// (released), which is when it is written down. 100 % holds the knob a
 /// little, as it is where most people come back to.
 fn volume(ui: &mut Ui, label: &str, value: f32, muted: bool) -> Option<(f32, bool)> {
-    let (row, _) = ui.allocate_exact_size(vec2(PERSON_W, PERSON_LABEL_H), Sense::hover());
+    slider(ui, PERSON_W, label, value, 2.0, muted)
+}
+
+/// A volume from 0 to `max` (1 for 100 %, 2 for 200 %), `width` wide, its
+/// label above with the value. Returns the new value while it is clicked
+/// or dragged, and whether the change is done (released). Going past 100 %,
+/// a mark shows where 100 % is, and the knob stops there a little.
+pub(super) fn slider(
+    ui: &mut Ui,
+    width: f32,
+    label: &str,
+    value: f32,
+    max: f32,
+    muted: bool,
+) -> Option<(f32, bool)> {
+    let (row, _) = ui.allocate_exact_size(vec2(width, PERSON_LABEL_H), Sense::hover());
     ui.painter().text(
         pos2(row.left() + 10.0, row.center().y),
         egui::Align2::LEFT_CENTER,
@@ -2373,21 +2388,24 @@ fn volume(ui: &mut Ui, label: &str, value: f32, muted: bool) -> Option<(f32, boo
         if muted { DANGER } else { TEXT },
     );
     let (rect, resp) =
-        ui.allocate_exact_size(vec2(PERSON_W, PERSON_SLIDER_H), Sense::click_and_drag());
+        ui.allocate_exact_size(vec2(width, PERSON_SLIDER_H), Sense::click_and_drag());
     let resp = resp.on_hover_cursor(CursorIcon::PointingHand);
-    let track = Rect::from_center_size(rect.center(), vec2(PERSON_W - 28.0, 4.0));
+    let track = Rect::from_center_size(rect.center(), vec2(width - 28.0, 4.0));
     let painter = ui.painter();
     painter.rect_filled(track, CornerRadius::same(2), BG4);
-    let fraction = (shown / 2.0).clamp(0.0, 1.0);
+    let fraction = (shown / max).clamp(0.0, 1.0);
     let knob = pos2(track.left() + track.width() * fraction, track.center().y);
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(knob.x, track.max.y)),
         CornerRadius::same(2),
         if muted { FAINT } else { ACCENT },
     );
-    // Where 100 % is.
-    let mark = track.left() + track.width() / 2.0;
-    painter.vline(mark, track.y_range().expand(3.0), Stroke::new(1.0, MUTED));
+    let past_full = max > 1.0;
+    if past_full {
+        // Where 100 % is.
+        let mark = track.left() + track.width() / max;
+        painter.vline(mark, track.y_range().expand(3.0), Stroke::new(1.0, MUTED));
+    }
     let r = if resp.hovered() || resp.dragged() {
         7.0
     } else {
@@ -2400,8 +2418,8 @@ fn volume(ui: &mut Ui, label: &str, value: f32, muted: bool) -> Option<(f32, boo
     let pointer = resp
         .interact_pointer_pos()
         .or_else(|| ui.ctx().input(|i| i.pointer.latest_pos()))?;
-    let mut v = ((pointer.x - track.left()) / track.width()).clamp(0.0, 1.0) * 2.0;
-    if (v - 1.0).abs() < 0.05 {
+    let mut v = ((pointer.x - track.left()) / track.width()).clamp(0.0, 1.0) * max;
+    if past_full && (v - 1.0).abs() < 0.05 {
         v = 1.0;
     }
     let v = (v * 100.0).round() / 100.0;
