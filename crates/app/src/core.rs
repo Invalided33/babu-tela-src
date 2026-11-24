@@ -413,6 +413,12 @@ pub enum PopKind {
     InkColor,
     InkClear(crate::ink::Surface),
     InkWho(crate::ink::Surface),
+    /// A picture in a conversation (a right click on it): the `index`-th
+    /// file of message `mid`.
+    Image {
+        mid: i64,
+        index: usize,
+    },
 }
 
 /// What the sticker picker shows while nothing is searched for.
@@ -480,6 +486,14 @@ pub enum Msg {
         url: String,
         name: String,
         result: Result<PathBuf, String>,
+    },
+    /// A picture pasted (Ctrl+V), written where it waits for the message,
+    /// or why not.
+    Pasted(Result<PathBuf, String>),
+    /// A message's picture on the clipboard ("Copiar imagem"), or why not.
+    Copied {
+        url: String,
+        result: Result<(), String>,
     },
     /// Where this PC stands with the account's keys (e2e/).
     E2e(crate::e2e::State),
@@ -697,6 +711,16 @@ pub struct Core {
     pub reply: Option<Message>,
     pub editing: Option<Editing>,
     pub files: Vec<PendingFile>,
+    /// Pictures being read off the clipboard (Ctrl+V) for the next message.
+    pub pasting: usize,
+    /// Messages' pictures being put on the clipboard ("Copiar imagem"), by
+    /// address.
+    pub copying: HashSet<String>,
+    /// Where pasted pictures wait for their message (clip.rs `dir`), and
+    /// those of each send still going: they go once the server has it
+    /// (`forget_pasted`).
+    paste_dir: PathBuf,
+    pasted_sends: HashMap<u64, Vec<PathBuf>>,
     /// The composer's "Enviar direto": the files waiting go straight to
     /// whoever downloads them, not to the server.
     pub direct_send: bool,
@@ -1045,6 +1069,13 @@ impl Core {
                 })
             },
         );
+        // Pictures pasted in an earlier run and left behind go after a while
+        // (clip.rs KEEP_FOR).
+        let paste_dir = crate::clip::dir(&shell);
+        {
+            let dir = paste_dir.clone();
+            rt.spawn_blocking(move || crate::clip::sweep(&dir));
+        }
         let mut core = Core {
             ctx,
             rt,
@@ -1094,6 +1125,10 @@ impl Core {
             reply: None,
             editing: None,
             files: Vec::new(),
+            pasting: 0,
+            copying: HashSet::new(),
+            paste_dir,
+            pasted_sends: HashMap::new(),
             direct_send: false,
             direct,
             saves: HashMap::new(),
@@ -1287,6 +1322,9 @@ impl Core {
             Msg::Done { then, err, res } => {
                 if let Then::Sent(id) = then {
                     self.sending.retain(|s| s.id != id);
+                    // On the server now (or lost with a session that ran
+                    // out): its pasted pictures are not needed here.
+                    self.forget_pasted(id, true);
                 }
                 self.done(then, err, res);
             }
@@ -1296,7 +1334,25 @@ impl Core {
                 content,
                 files,
                 error,
-            } => self.unsent(id, cid, content, files, error),
+            } => {
+                // Back to the composer: its pictures still go with it.
+                self.forget_pasted(id, false);
+                self.unsent(id, cid, content, files, error);
+            }
+            Msg::Pasted(result) => {
+                self.pasting = self.pasting.saturating_sub(1);
+                match result {
+                    Ok(path) => self.add_files(vec![path]),
+                    Err(e) => self.toast(crate::tf!("core.paste_failed", e = e)),
+                }
+            }
+            Msg::Copied { url, result } => {
+                self.copying.remove(&url);
+                match result {
+                    Ok(()) => self.toast(crate::t!("chat.image_copied")),
+                    Err(e) => self.toast(crate::tf!("chat.copy_failed", e = e)),
+                }
+            }
             Msg::Picked(Pick::Attach, paths) => self.add_files(paths),
             Msg::Picked(Pick::Avatar, paths) => {
                 if let Some(path) = paths.into_iter().next() {
@@ -3585,33 +3641,66 @@ impl Core {
         });
     }
 
-    /// Ctrl+V in the composer: copied files, or a copied picture (a
-    /// screenshot, say), which becomes a PNG.
-    pub fn paste_files(&mut self) -> bool {
-        let Ok(mut clip) = arboard::Clipboard::new() else {
-            return false;
-        };
-        if let Ok(list) = clip.get().file_list()
-            && !list.is_empty()
-        {
-            self.add_files(list);
-            return true;
-        }
-        let Ok(img) = clip.get_image() else {
-            return false;
-        };
-        let Some(buffer) =
-            image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
-        else {
-            return false;
-        };
+    /// Ctrl+V of a picture (a screenshot, a picture copied in a browser):
+    /// read off the clipboard and written as a PNG on a thread of its own (a
+    /// big screenshot takes a moment), then on the next message like any
+    /// file (`Msg::Pasted`).
+    pub fn paste_image(&mut self) {
+        let dir = self.paste_dir.clone();
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        let path = std::env::temp_dir().join(format!("imagem-{stamp}.png"));
-        if buffer.save(&path).is_ok() {
-            self.add_files(vec![path]);
-            return true;
+        let name = format!("{}-{stamp}.png", crate::t!("core.pasted_image"));
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        self.pasting += 1;
+        self.rt.spawn_blocking(move || {
+            let _ = tx.send(Msg::Pasted(crate::clip::save_image(&dir, &name)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The X on a file waiting to go: it no longer goes, and a pasted
+    /// picture is deleted.
+    pub fn remove_file(&mut self, i: usize) {
+        if i < self.files.len() {
+            let f = self.files.remove(i);
+            crate::clip::forget(&self.paste_dir, &f.path);
         }
-        false
+    }
+
+    /// A send's pasted pictures: deleted when it is done (`gone`), or only
+    /// no longer tied to it (back in the composer). One sent directly is
+    /// served from here, so it stays (clip.rs `sweep` takes it later).
+    fn forget_pasted(&mut self, send: u64, gone: bool) {
+        let Some(paths) = self.pasted_sends.remove(&send) else {
+            return;
+        };
+        if gone {
+            let dir = self.paste_dir.clone();
+            self.rt.spawn_blocking(move || {
+                for path in paths {
+                    crate::clip::forget(&dir, &path);
+                }
+            });
+        }
+    }
+
+    /// "Copiar imagem" on a message's picture: decrypted (from the copy on
+    /// disk the chat showed it from, when there is one) and put on the
+    /// clipboard as a picture, for Ctrl+V anywhere.
+    pub fn copy_image(&mut self, a: Attachment) {
+        if a.kind != Kind::Image || !self.copying.insert(a.url.clone()) {
+            return;
+        }
+        let images = self.images.clone();
+        self.spawn(async move {
+            let result = match images.bytes(&a.url).await {
+                Ok(bytes) => tokio::task::spawn_blocking(move || crate::clip::put_image(&bytes))
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|r| r),
+                Err(e) => Err(e),
+            };
+            Msg::Copied { url: a.url, result }
+        });
     }
 
     pub fn send_message(&mut self) {
@@ -3878,6 +3967,16 @@ impl Core {
                 progress: progress.clone(),
                 direct: files.iter().any(|f| f.direct),
             });
+        }
+        // Pasted pictures going to the server are deleted here once it has
+        // the message (`forget_pasted`).
+        let pasted: Vec<PathBuf> = files
+            .iter()
+            .filter(|f| !f.direct && crate::clip::is_pasted(&self.paste_dir, &f.path))
+            .map(|f| f.path.clone())
+            .collect();
+        if !pasted.is_empty() {
+            self.pasted_sends.insert(out.send, pasted);
         }
         let Outgoing {
             send: id,

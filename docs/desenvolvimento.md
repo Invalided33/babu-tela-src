@@ -75,6 +75,7 @@ Para testar uma conversa, use a sessão de teste em `PROSA_SMOKE_TOKEN` e indiqu
 | Chamada e slides | `tela-cheia:on`, `apresentar:C:\dados\aula.pdf`, `slide:2`, `tecla:PageDown`, `apresentar:fim` |
 | Anotações | `anotar:ana`, `ferramenta:rect`, `cor:3`, `arrastar:anotacao`, `desfazer`, `limpar:meus` |
 | Arquivos diretos | `direto:on`, `wait-direto-msg:60`, `baixar:C:\dados`, `pausar-direto`, `continuar-direto`, `wait-direto:60` |
+| Colar e copiar | `sem-foco`, `atalho:ctrl+v`, `atalho:ctrl+shift+v`, `wait-colado:30`, `remover-anexo:0`, `copiar-imagem:0`, `wait-copiado:30`, `rclick:imagem:foto.png` |
 | Música | `open:music`, `musica:<link>`, `wait-musica:60`, `volume-todos:65`, `volume-meu:120` |
 
 O relatório inclui o resultado das ações, campos de interface, transferências em `direct` e a fila, os volumes e o nível de áudio em `music`. Para serviços de teste, `BABUTELA_EMOJI_URL`, `BABUTELA_GIPHY_URL` e `BABUTELA_GOOGLE_AUTH_URL` substituem os respectivos endereços. O teste de atualização do instalador utiliza `BABUTELA_SETUP_TEST` para isolar arquivos e registro do Windows. A lista implementada de ações e de campos está no cliente. [Modo de teste](../crates/app/src/smoke.rs) · [Convenções do instalador](../crates/buildinfo/src/lib.rs)

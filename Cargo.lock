@@ -775,6 +775,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "chrono",
+ "clipboard-win",
  "cpal",
  "eframe",
  "egui",

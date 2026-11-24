@@ -25,9 +25,13 @@ No seletor de figurinhas, escolha **Em alta**, pesquise ou abra **Favoritas**. A
 
 O espaço disponível no servidor costuma limitar o tamanho de um anexo antes do máximo técnico do upload, cerca de 996 GB por objeto cifrado. Por padrão, todos os anexos da instância dividem uma cota de 10 GB. **Enviar direto** dispensa esse espaço no servidor. [Configuração da cota](operacao.md#configurar-uma-instância)
 
+Na caixa de mensagem, **Ctrl+V** anexa os arquivos copiados no Explorador de Arquivos ou uma imagem copiada, como um recorte da Ferramenta de Captura, uma imagem do navegador ou um desenho do Paint. A imagem entra como um PNG com a data e a hora no nome. Se o conteúdo copiado também tiver texto, como células do Excel, o app cola o texto. A exceção é o endereço que alguns navegadores copiam junto com a imagem. **Ctrl+Shift+V** cola apenas o texto.
+
 Para usar **Enviar direto**, anexe os arquivos e marque a opção embaixo da lista antes de enviar. Ela vale para todos os anexos daquela mensagem. O app calcula os hashes antes de disponibilizar o arquivo e verifica cada pedaço que chega. Mantenha o original no mesmo lugar até terminar de compartilhar. O cartão permite pausar, continuar ou cancelar o download, e mostra se os PCs estão usando o relé. Quem enviou pode interromper a distribuição com **Parar de compartilhar** ou apagando a mensagem.
 
 **Baixar** abre um diálogo para escolher o destino. Durante a transferência, o app grava um arquivo com o sufixo `.parcial` e só atribui o nome escolhido depois da conferência. No envio direto, os pedaços já verificados podem ser retomados. O Windows recebe a marca de arquivo vindo da internet. Ao terminar, use **Abrir** ou **Mostrar na pasta**.
+
+Para usar uma imagem da conversa em outro programa, passe o mouse sobre ela e clique no botão de copiar, ou clique nela com o botão direito e escolha **Copiar imagem**. O app coloca a imagem decifrada na área de transferência do Windows, com a transparência, pronta para colar com Ctrl+V. [Área de transferência](../crates/app/src/clip.rs)
 
 Os anexos de áudio tocam na conversa enquanto chegam e são decifrados em memória. O vídeo cifrado é baixado e decifrado em uma pasta temporária para o Media Foundation do Windows. O app apaga essa cópia ao fechar o player. O suporte a formatos de vídeo depende dos codecs instalados. [Transferência direta](../crates/app/src/direct) · [Uploads no Worker](../crates/worker/src/files.rs) · [Reprodução de mídia](../crates/app/src/media)
 
@@ -63,6 +67,7 @@ As ferramentas ficam em `%USERPROFILE%\.babutela\yt-dlp`. O app confere o SHA-25
 | `%APPDATA%\Prosa` | Configurações (`settings.json`), preferências (`prefs.json`), sessão protegida (`session.bin`), chaves e registro de identidades por conta. O nome da pasta vem da versão antiga do app. |
 | `%APPDATA%\Prosa\cache` e `%APPDATA%\Prosa\tor` | Imagens em cache, arquivos de emoji e, ao usar Tor, dados locais do Arti. O cache conserva as imagens cifradas como vieram do servidor. |
 | `%LOCALAPPDATA%\Prosa\direto` | Índice dos arquivos compartilhados por este PC, dos downloads diretos e de seu progresso. |
+| `%LOCALAPPDATA%\Prosa\colados` | Imagens coladas com Ctrl+V à espera do envio. O app apaga cada uma quando a mensagem chega ao servidor ou quando o anexo é retirado. Uma imagem colada e enviada direto fica disponível por 30 dias. Depois desse prazo, o app apaga as que sobraram. |
 | `%LOCALAPPDATA%\Prosa\updates` | Instalador preparado para atualização e seu estado de verificação. |
 | `%TEMP%\babutela-arquivos` e `%TEMP%\babutela-midia` | Cópias decifradas de anexos abertos em outros programas e de vídeos em reprodução, respectivamente. |
 

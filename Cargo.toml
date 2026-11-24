@@ -25,6 +25,10 @@ babutela-buildinfo = { path = "crates/buildinfo" }
 babutela-denoise = { path = "crates/denoise" }
 
 arboard = { version = "3.7.0", default-features = false, features = ["image-data"] }
+# The clipboard's formats as they are (clip.rs): the PNG a program copied,
+# kept as it came, and whether files or a picture are there. Already under
+# arboard, at the version it uses.
+clipboard-win = { version = "5.4.1", features = ["std"] }
 # Tor inside the app (Configurações → Privacidade, crates/app/src/tor.rs):
 # Arti, the Tor Project's own Tor in Rust, so nothing has to be installed.
 # rustls (with the ring the app installs) for its links, and its directory

@@ -9,7 +9,7 @@ use egui::{
 
 use super::Acts;
 use super::widgets::{self, Button, Ib};
-use crate::core::{Action, Core, Editing, Modal, Pick, PopKind, Saved};
+use crate::core::{Action, Core, Editing, Modal, Pick, Pop, PopKind, Saved};
 use crate::giphy::{self, Frames, Lookup};
 use crate::icons::{self, Icon};
 use crate::images::{Fit, Images};
@@ -149,6 +149,51 @@ pub(super) fn download_button(
                 save_attachment(acts, &core.api, a);
             }
         }
+    }
+}
+
+/// "Copiar imagem" over a picture, `side` points: lit while it goes to the
+/// clipboard.
+fn copy_button(ui: &mut Ui, core: &Core, a: &Attachment, side: f32, acts: &mut Acts) {
+    let style = if core.copying.contains(&a.url) {
+        Ib::On
+    } else {
+        Ib::Bare
+    };
+    let resp = widgets::icon_button(ui, Icon::Copy, side, style, t!("chat.copy_image"));
+    crate::smoke::target(|| format!("copiar-imagem:{}", a.name), resp.rect);
+    if resp.clicked() {
+        let a = a.clone();
+        acts.later(move |c| c.copy_image(a));
+    }
+}
+
+/// The menu of a picture in a conversation (a right click on it): copy it,
+/// save it, open it. `index`: which of message `mid`'s files it is.
+pub(super) fn image_menu(ui: &mut Ui, core: &Core, mid: i64, index: usize, acts: &mut Acts) {
+    let found = core
+        .find_msg(mid)
+        .and_then(|m| m.attachments.get(index))
+        .filter(|a| a.kind == Kind::Image)
+        .cloned();
+    let Some(a) = found else {
+        // The message went (deleted, another conversation opened).
+        acts.later(|c| c.pop = None);
+        return;
+    };
+    let close = |acts: &mut Acts| acts.later(|c| c.pop = None);
+    if super::modals::menu_item(ui, t!("chat.copy_image"), false) {
+        let a = a.clone();
+        acts.later(move |c| c.copy_image(a));
+        close(acts);
+    }
+    if super::modals::menu_item(ui, t!("direct.download"), false) {
+        save_attachment(acts, &core.api, &a);
+        close(acts);
+    }
+    if super::modals::menu_item(ui, t!("chat.open"), false) {
+        open_attachment(acts, &core.api, &a);
+        close(acts);
     }
 }
 
@@ -470,7 +515,7 @@ fn composer(
             .request_repaint_after(std::time::Duration::from_millis(200));
     }
     let mut send = false;
-    let mut paste = false;
+    let pasting = core.pasting;
     let id = composer_id(cid);
     // The "@" list, as it was on the last frame: while it shows, the
     // arrows, Enter, Tab and Esc are its own, taken before the box sees
@@ -543,6 +588,25 @@ fn composer(
             for up in &sends {
                 upload_row(ui, up, acts);
             }
+            if pasting > 0 {
+                Frame::new()
+                    .inner_margin(Margin {
+                        left: 12,
+                        right: 12,
+                        top: 8,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(Icon::Clip.image(icons::SMALL, MUTED));
+                            ui.label(
+                                egui::RichText::new(t!("chat.pasting"))
+                                    .size(12.0)
+                                    .color(MUTED),
+                            );
+                        });
+                    });
+            }
             if !files.is_empty() {
                 Frame::new()
                     .inner_margin(Margin {
@@ -598,21 +662,10 @@ fn composer(
             if resp.changed() {
                 acts.later(move |c| c.typed(cid));
             }
+            // Ctrl+V of a picture or of files is decided before the frame
+            // (`paste`): here only text arrives.
             if resp.has_focus() {
-                let (enter, ctrl_v) = ui.input(|i| {
-                    (
-                        i.key_pressed(Key::Enter) && !i.modifiers.shift,
-                        i.events.iter().any(|e| {
-                            matches!(
-                                e,
-                                egui::Event::Key { key: Key::V, pressed: true, modifiers, .. }
-                                    if modifiers.command
-                            ) || matches!(e, egui::Event::Paste(_))
-                        }),
-                    )
-                });
-                send = enter;
-                paste = ctrl_v && may_attach;
+                send = ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
             }
             if row.attach.as_ref().is_some_and(Response::clicked) {
                 acts.later(|c| c.pick_files(Pick::Attach));
@@ -654,11 +707,71 @@ fn composer(
     if send {
         acts.later(Core::send_message);
     }
-    if paste {
-        acts.later(|c| {
-            c.paste_files();
-        });
+}
+
+/// The composer's id while one is on screen to take what is pasted: a
+/// conversation open (a text channel or a direct one) where I may write,
+/// with no dialog over it.
+fn composer_on_screen(core: &Core) -> Option<Id> {
+    if core.phase != crate::core::Phase::Ready || core.modal.is_some() {
+        return None;
     }
+    let cid = core.view.channel()?;
+    let may_send = match (core.current_dm(), core.current_channel()) {
+        (Some(d), _) => !core.blocks.contains(&d.user.id),
+        (None, Some((_, c))) => !c.is_voice() && c.can(P_SEND),
+        _ => false,
+    };
+    may_send.then(|| composer_id(cid))
+}
+
+/// What a Ctrl+V brings, decided before the frame (main.rs
+/// `raw_input_hook`, clip.rs `Keys`): the event to put in its place.
+///
+/// In the composer, or with nothing focused while a conversation is open
+/// (the composer takes the focus then, as in Discord), files copied in
+/// Explorer attach to the next message; else a picture does, unless there
+/// is text too that is more than a link (Excel and OneNote put a picture
+/// beside the text they copy, Firefox the picture's address beside it).
+/// Text goes into the field that has the focus, as always. `plain`
+/// (Ctrl+Shift+V) takes the text alone; `again` (the keys held down)
+/// attaches nothing again.
+pub fn paste(
+    ctx: &egui::Context,
+    core: &mut Core,
+    plain: bool,
+    again: bool,
+) -> Option<egui::Event> {
+    let text = crate::clip::text();
+    let focused = ctx.memory(|m| m.focused());
+    let Some(id) = composer_on_screen(core).filter(|id| focused.is_none_or(|f| f == *id)) else {
+        return text.map(egui::Event::Paste);
+    };
+    if focused.is_none() {
+        ctx.memory_mut(|m| m.request_focus(id));
+    }
+    if plain || again {
+        return text.map(egui::Event::Paste);
+    }
+    let files = crate::clip::files();
+    let image = files.is_empty()
+        && crate::clip::has_image()
+        && text.as_deref().is_none_or(crate::clip::just_a_link);
+    if files.is_empty() && !image {
+        return text.map(egui::Event::Paste);
+    }
+    if !core.may_attach_here() {
+        if text.is_none() {
+            core.toast(t!("chat.no_attach_here"));
+        }
+        return text.map(egui::Event::Paste);
+    }
+    if image {
+        core.paste_image();
+    } else {
+        core.add_files(files);
+    }
+    None
 }
 
 // ---------------------------------------------------------------- @mentions
@@ -1208,11 +1321,7 @@ fn chip(ui: &mut Ui, name: &str, i: usize, acts: &mut Acts) {
                 });
                 let label = tf!("chat.remove_file", name = name);
                 if widgets::icon_button_sized(ui, Icon::X, 18.0, 12.0, Ib::Bare, &label).clicked() {
-                    acts.later(move |c| {
-                        if i < c.files.len() {
-                            c.files.remove(i);
-                        }
-                    });
+                    acts.later(move |c| c.remove_file(i));
                 }
             });
         });
@@ -1533,7 +1642,7 @@ fn message(
             if let Some(gid) = &m.sticker {
                 sticker(ui, core, m.id, gid, acts);
             }
-            for a in &m.attachments {
+            for (index, a) in m.attachments.iter().enumerate() {
                 if a.kind == Kind::Direct {
                     super::direct::card(ui, core, m, a, acts);
                 } else if super::player::playable(a) {
@@ -1545,7 +1654,7 @@ fn message(
                         super::player::audio(ui, core, a, acts);
                     }
                 } else {
-                    attachment(ui, core, a, acts);
+                    attachment(ui, core, m.id, index, a, acts);
                 }
             }
             if !m.reactions.is_empty() {
@@ -1887,11 +1996,12 @@ fn reactions(ui: &mut Ui, core: &Core, m: &Message, acts: &mut Acts) {
     });
 }
 
-/// A picture inline (a click opens it to look at, "Baixar" over its corner
-/// saves it), anything else as a card that saves it where the person
-/// chooses. A message's file is encrypted on the server (e2e/file.rs): it
-/// comes down here, decrypted. Nothing a click brings down runs by itself.
-fn attachment(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
+/// A picture inline (a click opens it to look at, "Copiar imagem" and
+/// "Baixar" over its corner, and the same in its right-click menu),
+/// anything else as a card that saves it where the person chooses. A
+/// message's file is encrypted on the server (e2e/file.rs): it comes down
+/// here, decrypted. Nothing a click brings down runs by itself.
+fn attachment(ui: &mut Ui, core: &Core, mid: i64, index: usize, a: &Attachment, acts: &mut Acts) {
     ui.add_space(4.0);
     let sealed = crate::e2e::key_for(&a.url).is_some();
     if a.kind == Kind::Image {
@@ -1917,16 +2027,27 @@ fn attachment(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
             }
         };
         let picture = resp.rect;
-        if resp
+        crate::smoke::target(|| format!("imagem:{}", a.name), picture);
+        let resp = resp
             .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text(&a.name)
-            .clicked()
-        {
+            .on_hover_text(&a.name);
+        if resp.clicked() {
             open_attachment(acts, &core.api, a);
         }
-        // Its button, at the top right while the pointer is on it (and
-        // while it comes down or once saved, to say so).
-        if ui.rect_contains_pointer(picture) || core.saves.contains_key(&a.url) {
+        if resp.secondary_clicked() {
+            let at = resp.interact_pointer_pos().unwrap_or(picture.center());
+            acts.later(move |c| {
+                c.pop = Some(Pop {
+                    kind: PopKind::Image { mid, index },
+                    anchor: Rect::from_min_size(at, Vec2::ZERO),
+                });
+            });
+        }
+        // Its buttons, at the top right while the pointer is on it: "Copiar
+        // imagem" and "Baixar" (that one also while it comes down or once
+        // saved, to say so).
+        let hovered = ui.rect_contains_pointer(picture);
+        if hovered || core.saves.contains_key(&a.url) {
             const SIDE: f32 = 30.0;
             let corner = Rect::from_min_size(
                 pos2(picture.right() - 6.0 - SIDE, picture.top() + 6.0),
@@ -1936,6 +2057,13 @@ fn attachment(ui: &mut Ui, core: &Core, a: &Attachment, acts: &mut Acts) {
                 .circle_filled(corner.center(), SIDE / 2.0, BG0.gamma_multiply(0.9));
             let mut over = ui.new_child(egui::UiBuilder::new().max_rect(corner));
             download_button(&mut over, core, a, SIDE, acts);
+            if hovered {
+                let left = corner.translate(vec2(-(SIDE + 6.0), 0.0));
+                ui.painter()
+                    .circle_filled(left.center(), SIDE / 2.0, BG0.gamma_multiply(0.9));
+                let mut over = ui.new_child(egui::UiBuilder::new().max_rect(left));
+                copy_button(&mut over, core, a, SIDE, acts);
+            }
         }
         return;
     }

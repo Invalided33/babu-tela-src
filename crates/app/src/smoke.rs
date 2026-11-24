@@ -435,6 +435,15 @@ impl Smoke {
             };
             return self.hold_while(secs, 120, waiting);
         }
+        // wait-colado:<seconds>: every picture pasted is on the next
+        // message (or failed); wait-copiado:<seconds>: every "Copiar
+        // imagem" is on the clipboard (or failed).
+        if let Some(secs) = step.strip_prefix("wait-colado:") {
+            return self.hold_while(secs, 30, core.pasting > 0);
+        }
+        if let Some(secs) = step.strip_prefix("wait-copiado:") {
+            return self.hold_while(secs, 30, !core.copying.is_empty());
+        }
         // wait-salvo:<seconds>: every file saved with "Baixar" is down (or
         // failed).
         if let Some(secs) = step.strip_prefix("wait-salvo:") {
@@ -747,6 +756,8 @@ impl Smoke {
                         .collect(),
                 );
             }
+            // remover-anexo:<i>: the X on the i-th file waiting to go.
+            ("remover-anexo", i) => core.remove_file(i.parse().unwrap_or(0)),
             // The X on the newest send's bar.
             ("cancel-send", _) => {
                 if let Some(id) = core.sending.last().map(|s| s.id) {
@@ -759,7 +770,8 @@ impl Smoke {
             // nothing left to do once they get here.
             (
                 "wait-sent" | "burst" | "until" | "wait-anims" | "wait-emoji" | "wait-direto-msg"
-                | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo" | "wait-musica",
+                | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo" | "wait-musica"
+                | "wait-colado" | "wait-copiado",
                 _,
             ) => {}
             // direto:on|off: the composer's "Enviar direto", for the files
@@ -1104,6 +1116,12 @@ impl Smoke {
                 }
                 return Duration::from_secs(2);
             }
+            // copiar-imagem:<n>: "Copiar imagem" on the n-th attachment of
+            // the newest message (see wait-copiado).
+            ("copiar-imagem", n) => match newest_attachment(core, n) {
+                Some(a) => core.copy_image(a),
+                None => self.misses.push(step.to_owned()),
+            },
             // Plays the n-th attachment of the newest message.
             ("play", n) => {
                 if let Some(a) = newest_attachment(core, n) {
@@ -1328,6 +1346,11 @@ impl Smoke {
                     label.to_owned(),
                     json!({
                         "music": music,
+                        "pendingFiles": pending_files(core),
+                        "toasts": core.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>(),
+                        "focused": core.view.channel().map(|cid| {
+                            core.ctx.memory(|m| m.has_focus(crate::ui::chat::composer_id(cid)))
+                        }),
                         "voiceStats": core.voice.stats(),
                         "voiceCall": core.voice.report(),
                         "voicePeople": people,
@@ -1399,6 +1422,30 @@ impl Smoke {
                 }
                 return Duration::from_secs(1);
             }
+            // atalho:<keys> presses a key with Ctrl, Shift or Alt held, as
+            // the keyboard does (atalho:ctrl+v, atalho:ctrl+shift+v,
+            // atalho:shift+Insert): the clipboard's keys go the app's way
+            // from here (main.rs `raw_input_hook`).
+            ("atalho", keys) => match combo(keys) {
+                Some((key, modifiers)) => {
+                    for pressed in [true, false] {
+                        self.input.push_back(vec![egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers,
+                        }]);
+                    }
+                    return Duration::from_secs(1);
+                }
+                None => {
+                    crate::logln!("smoke: atalho desconhecido: {keys}");
+                    self.misses.push(step.to_owned());
+                }
+            },
+            // sem-foco: no field has the keyboard (a click on the messages).
+            ("sem-foco", _) => core.ctx.memory_mut(|m| m.stop_text_input()),
             // tecla:<egui's name for it> presses a key (tecla:ArrowRight,
             // tecla:PageDown), as a presenter's remote does.
             ("tecla", name) => match egui::Key::from_name(name) {
@@ -1561,9 +1608,7 @@ impl Smoke {
             "sending": core.sending.iter().map(|s| json!({
                 "files": s.files, "sent": s.progress.sent(), "total": s.progress.total(),
             })).collect::<Vec<_>>(),
-            "pendingFiles": core.files.iter().map(|f| json!({
-                "name": f.name, "uploaded": f.uploaded.is_some(),
-            })).collect::<Vec<_>>(),
+            "pendingFiles": pending_files(core),
             "voice": core.voice.channel_id(),
             "voiceStats": core.voice.stats(),
             "voiceCall": core.voice.report(),
@@ -1608,6 +1653,8 @@ impl Smoke {
         report["fullscreen"] = json!(core.ctx.input(|i| i.viewport().fullscreen));
         report["unwatched"] = json!(core.voice.unwatched());
         report["draft"] = json!(core.view.channel().and_then(|c| core.drafts.get(&c)));
+        report["pasting"] = json!(core.pasting);
+        report["copying"] = json!(core.copying);
         report["mentionList"] = core.view.channel().map_or(serde_json::Value::Null, |cid| {
             crate::ui::chat::mention_report(&core.ctx, cid)
         });
@@ -1736,6 +1783,38 @@ fn newest_direct(core: &Core) -> Option<(crate::model::Message, crate::model::At
                 .find(|a| a.kind == crate::model::Kind::Direct)
                 .map(|a| (m.clone(), a.clone()))
         })
+}
+
+/// The files waiting to go with the next message, and where each is.
+fn pending_files(core: &Core) -> serde_json::Value {
+    json!(
+        core.files
+            .iter()
+            .map(|f| json!({
+                "name": f.name, "uploaded": f.uploaded.is_some(), "path": f.path, "size": f.size,
+            }))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// "ctrl+shift+v" as a key and the modifiers held: on Windows, Ctrl is
+/// also egui's `command`, as egui-winit says.
+fn combo(keys: &str) -> Option<(egui::Key, egui::Modifiers)> {
+    let mut modifiers = egui::Modifiers::NONE;
+    let mut parts: Vec<&str> = keys.split('+').collect();
+    let key = egui::Key::from_name(parts.pop()?)?;
+    for part in parts {
+        match part.to_ascii_lowercase().as_str() {
+            "ctrl" => {
+                modifiers.ctrl = true;
+                modifiers.command = true;
+            }
+            "shift" => modifiers.shift = true,
+            "alt" => modifiers.alt = true,
+            _ => return None,
+        }
+    }
+    Some((key, modifiers))
 }
 
 /// The n-th attachment of the newest message in the open channel.

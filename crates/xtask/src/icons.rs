@@ -206,6 +206,11 @@ const ICONS: &[(&str, &str)] = &[
         "folder",
         r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>"#,
     ),
+    // "Copiar imagem": a sheet over another.
+    (
+        "copy",
+        r#"<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>"#,
+    ),
 ];
 
 /// The title bar's three buttons: a 12 box and a thin stroke, as they were.

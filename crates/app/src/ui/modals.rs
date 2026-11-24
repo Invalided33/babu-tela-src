@@ -2147,6 +2147,7 @@ pub fn pop(ctx: &egui::Context, core: &mut Core, acts: &mut Acts) {
         ),
         PopKind::InkClear(_) => (222.0, 2.0 * 34.0 + 12.0),
         PopKind::InkWho(_) => (PERSON_W + 12.0, 2.0 * PERSON_ROW_H + 12.0),
+        PopKind::Image { .. } => (222.0, 3.0 * 34.0 + 12.0),
     };
     let x = p
         .anchor
@@ -2189,6 +2190,9 @@ pub fn pop(ctx: &egui::Context, core: &mut Core, acts: &mut Acts) {
                     PopKind::InkColor => super::ink::color_pop(ui, core, acts),
                     PopKind::InkClear(s) => super::ink::clear_pop(ui, core, s, acts),
                     PopKind::InkWho(s) => super::ink::who_pop(ui, core, s, acts),
+                    PopKind::Image { mid, index } => {
+                        super::chat::image_menu(ui, core, mid, index, acts)
+                    }
                 });
         });
     if resp.response.clicked_elsewhere()

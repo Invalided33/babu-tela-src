@@ -17,8 +17,8 @@ use crate::net::Api;
 const KEEP_FOR: Duration = Duration::from_secs(30 * 24 * 3600);
 
 /// Pictures larger than this are not decoded (a decompression bomb would
-/// otherwise eat the memory).
-const MAX_PIXELS: u64 = 40_000_000;
+/// otherwise eat the memory), here nor for the clipboard (clip.rs).
+pub(crate) const MAX_PIXELS: u64 = 40_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Fit {
@@ -143,7 +143,10 @@ impl Images {
         self.dir.join(hex::encode(&h[..16]))
     }
 
-    async fn load(&self, url: &str, fit: Fit) -> Result<ColorImage, String> {
+    /// The file at `url` as it was sent, from the copy on disk when there is
+    /// one: a message's picture is kept here as the server has it,
+    /// encrypted (e2e/file.rs), and decrypted only in memory.
+    pub async fn bytes(&self, url: &str) -> Result<Vec<u8>, String> {
         let path = self.cache_path(url);
         let bytes = match tokio::fs::read(&path).await {
             Ok(b) if !b.is_empty() => {
@@ -158,9 +161,11 @@ impl Images {
                 b
             }
         };
-        // A message's picture is kept here as the server has it, encrypted
-        // (e2e/file.rs), and decrypted only in memory.
-        let bytes = crate::e2e::open_downloaded(url, bytes)?;
+        crate::e2e::open_downloaded(url, bytes)
+    }
+
+    async fn load(&self, url: &str, fit: Fit) -> Result<ColorImage, String> {
+        let bytes = self.bytes(url).await?;
         tokio::task::spawn_blocking(move || decode(&bytes, fit))
             .await
             .map_err(|e| e.to_string())?

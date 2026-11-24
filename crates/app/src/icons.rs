@@ -45,6 +45,7 @@ icons! {
     Circle => "circle",
     Clip => "clip",
     Clock => "clock",
+    Copy => "copy",
     Direct => "direct",
     Down => "down",
     Edit => "edit",

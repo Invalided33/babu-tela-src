@@ -197,6 +197,8 @@
   "chat.cancel_send": "Cancelar envio",
 
   "chat.remove_file": "Remover {name}",
+  "chat.pasting": "Colando imagem…",
+  "chat.no_attach_here": "Você não pode enviar arquivos aqui.",
 
   "chat.load_older": "Carregar mensagens anteriores",
   "chat.dm_start": "Este é o começo da sua conversa.",
@@ -224,6 +226,9 @@
 
   "chat.open": "Abrir",
   "chat.open_in_browser": "Abrir no navegador",
+  "chat.copy_image": "Copiar imagem",
+  "chat.image_copied": "Imagem copiada.",
+  "chat.copy_failed": "Não deu para copiar a imagem: {e}",
 
   "friends.title": "Amigos",
   "friends.tab_online": "Online",
@@ -693,6 +698,8 @@
   "core.ttl_warn": "As mensagens novas desta conversa vão desaparecer.",
   "core.open_failed": "Não deu para abrir {name}: {e}",
   "core.download_failed": "Não deu para baixar {name}: {e}",
+  "core.pasted_image": "imagem",
+  "core.paste_failed": "Não deu para colar a imagem: {e}",
   "core.image_open_failed": "Não deu para abrir essa imagem.",
   "core.image_empty": "Essa imagem está vazia.",
   "core.image_came_empty": "a imagem veio vazia",

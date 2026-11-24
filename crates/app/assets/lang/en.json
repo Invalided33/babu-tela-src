@@ -197,6 +197,8 @@
   "chat.cancel_send": "Cancel upload",
 
   "chat.remove_file": "Remove {name}",
+  "chat.pasting": "Pasting image…",
+  "chat.no_attach_here": "You can't send files here.",
 
   "chat.load_older": "Load earlier messages",
   "chat.dm_start": "This is the start of your conversation.",
@@ -224,6 +226,9 @@
 
   "chat.open": "Open",
   "chat.open_in_browser": "Open in browser",
+  "chat.copy_image": "Copy image",
+  "chat.image_copied": "Image copied.",
+  "chat.copy_failed": "Couldn't copy the image: {e}",
 
   "friends.title": "Friends",
   "friends.tab_online": "Online",
@@ -693,6 +698,8 @@
   "core.ttl_warn": "New messages in this conversation will disappear.",
   "core.open_failed": "Couldn't open {name}: {e}",
   "core.download_failed": "Couldn't download {name}: {e}",
+  "core.pasted_image": "image",
+  "core.paste_failed": "Couldn't paste the image: {e}",
   "core.image_open_failed": "Couldn't open that image.",
   "core.image_empty": "That image is empty.",
   "core.image_came_empty": "the image came out empty",

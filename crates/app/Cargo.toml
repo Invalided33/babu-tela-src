@@ -63,6 +63,7 @@ webrtc.workspace = true
 zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+clipboard-win.workspace = true
 windows.workspace = true
 windows-capture.workspace = true
 windows-core.workspace = true

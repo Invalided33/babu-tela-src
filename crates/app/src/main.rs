@@ -18,6 +18,7 @@ macro_rules! logln {
     };
 }
 
+mod clip;
 mod core;
 mod devices;
 mod direct;
@@ -72,6 +73,8 @@ struct App {
     last_frame: Option<std::time::Instant>,
     last_frame_nr: Option<u64>,
     cap: FrameCap,
+    /// Ctrl+C, Ctrl+X and Ctrl+V, made the clipboard's events (clip.rs).
+    keys: clip::Keys,
 }
 
 /// When the window still has to maximize: it opens maximized, except in a
@@ -222,24 +225,33 @@ impl eframe::App for App {
         theme::BG0.to_normalized_gamma_f32()
     }
 
+    /// The clipboard's keys become egui's clipboard events here, a paste
+    /// deciding what it brings (ui/chat.rs `paste`), before egui sees them.
+    ///
     /// Measuring, the test windows ignore the mouse: someone using the PC
     /// meanwhile must not click through what is being measured. A test's
-    /// own pointing and typing (`click:` and the like) goes in here.
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
-        let Some(smoke) = &mut self.smoke else { return };
-        if probe::on() {
-            raw.events.retain(|e| {
-                !matches!(
-                    e,
-                    egui::Event::PointerMoved(_)
-                        | egui::Event::MouseMoved(_)
-                        | egui::Event::PointerButton { .. }
-                        | egui::Event::PointerGone
-                        | egui::Event::MouseWheel { .. }
-                )
-            });
+    /// own pointing and typing (`click:` and the like) goes in here too,
+    /// ahead of the clipboard's keys, so a test's Ctrl+V goes the same way.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Some(smoke) = &mut self.smoke {
+            if probe::on() {
+                raw.events.retain(|e| {
+                    !matches!(
+                        e,
+                        egui::Event::PointerMoved(_)
+                            | egui::Event::MouseMoved(_)
+                            | egui::Event::PointerButton { .. }
+                            | egui::Event::PointerGone
+                            | egui::Event::MouseWheel { .. }
+                    )
+                });
+            }
+            smoke.feed(raw);
         }
-        smoke.feed(raw);
+        let core = &mut self.core;
+        self.keys.translate(&mut raw.events, |plain, again| {
+            ui::chat::paste(ctx, core, plain, again)
+        });
     }
 }
 
@@ -423,6 +435,11 @@ fn main() {
         viewport,
         centered: true,
         wgpu_options: wgpu_options(),
+        // Ctrl+C, Ctrl+X and Ctrl+V come as plain keys, and the app makes
+        // the clipboard's events from them (`raw_input_hook`, clip.rs):
+        // egui-winit's own pastes only text, and a Ctrl+V of files copied
+        // in Explorer never even reached the app.
+        clipboard_shortcuts: false,
         ..Default::default()
     };
     // Every call to the server runs on `rt`, which lives for as long as the
@@ -503,6 +520,7 @@ fn main() {
                 last_frame: None,
                 last_frame_nr: None,
                 cap: FrameCap::new(),
+                keys: clip::Keys::default(),
             }))
         }),
     );
