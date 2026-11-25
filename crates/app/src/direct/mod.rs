@@ -26,6 +26,7 @@
 mod fetch;
 pub mod hash;
 mod link;
+mod meter;
 mod serve;
 pub mod wire;
 
@@ -78,6 +79,10 @@ const ICE_FOR: Duration = Duration::from_secs(6 * 3600);
 
 /// The lists' file, in `dir`.
 const LIST: &str = "direto.json";
+
+/// Each transfer's totals, a JSON line each, beside the lists (meter.rs):
+/// what to look at when one went slow.
+const MEASUREMENTS: &str = "medidas.log";
 
 /// Where the lists live: %LOCALAPPDATA%\Prosa\direto, since they name places
 /// on this PC (nothing for a roaming profile); a test profile
@@ -277,6 +282,8 @@ struct Live {
     tries: u32,
     speed: Speed,
     relayed: bool,
+    /// How the last attempt's connection went (meter.rs).
+    readings: meter::Readings,
 }
 
 impl Live {
@@ -289,6 +296,7 @@ impl Live {
             tries: 0,
             speed: Speed::default(),
             relayed: false,
+            readings: meter::readings(),
         }
     }
 
@@ -339,7 +347,12 @@ struct Serving {
     sent: Arc<AtomicU64>,
     /// It has its turn and is sending.
     going: Arc<AtomicBool>,
+    /// How its connection goes (meter.rs).
+    readings: meter::Readings,
 }
+
+/// The sends that ended last, as their meters left them, for the report.
+const ENDED_SENDS: usize = 8;
 
 struct Inner {
     /// The account signed in, 0 when none.
@@ -353,6 +366,8 @@ struct Inner {
     /// Each partial file's: held by an attempt from its start to its end,
     /// so two never write the same file and nothing deletes it under one.
     disks: HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>,
+    /// The last ENDED_SENDS sends' readings (meter.rs), newest last.
+    ended_sends: Vec<Value>,
 }
 
 /// What a download's card shows.
@@ -451,6 +466,7 @@ impl Direct {
                 serving: Vec::new(),
                 turns: HashMap::new(),
                 disks: HashMap::new(),
+                ended_sends: Vec::new(),
             }),
             ice: Mutex::new(None),
             sends: Arc::new(Semaphore::new(SENDS)),
@@ -464,6 +480,11 @@ impl Direct {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Where each transfer's measurements go when it ends (meter.rs).
+    fn measurements(&self) -> PathBuf {
+        self.dir.join(MEASUREMENTS)
     }
 
     /// The lists go to the disk, from a thread of their own.
@@ -756,6 +777,7 @@ impl Direct {
             disk,
             halt: halt_rx,
             signals: signals_rx,
+            readings: live.readings.clone(),
         };
         let this = self.clone();
         let id = id.to_owned();
@@ -790,6 +812,12 @@ impl Direct {
         let mut again = None;
         match (halt, end) {
             (Halt::Cancel, _) => {}
+            // Resumed while this attempt was still ending (it tells the
+            // sender it stops, which takes a moment): the next goes now.
+            (Halt::Pause, _) if d.state == State::Active => {
+                live.phase = Phase::Idle;
+                again = Some(Duration::ZERO);
+            }
             (Halt::Pause | Halt::Leave, _) => live.phase = Phase::Idle,
             (Halt::Go, fetch::End::Done) => {
                 d.state = State::Done;
@@ -1048,6 +1076,7 @@ impl Direct {
         let (signals, signals_rx) = mpsc::unbounded_channel();
         let sent = Arc::new(AtomicU64::new(0));
         let going = Arc::new(AtomicBool::new(false));
+        let readings = meter::readings();
         st.serving.push(Serving {
             from,
             sid: sid.clone(),
@@ -1056,6 +1085,7 @@ impl Direct {
             signals,
             sent: sent.clone(),
             going: going.clone(),
+            readings: readings.clone(),
         });
         let turn = st
             .turns
@@ -1080,6 +1110,7 @@ impl Direct {
             going,
             sends: self.sends.clone(),
             turn,
+            readings,
         };
         let this = self.clone();
         self.rt.spawn(async move {
@@ -1095,6 +1126,19 @@ impl Direct {
             self.completed.fetch_add(1, Ordering::Relaxed);
         }
         let mut st = self.lock();
+        if let Some(s) = st.serving.iter().find(|s| s.from == from && s.sid == sid) {
+            let readings = s
+                .readings
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if !readings.is_null() {
+                if st.ended_sends.len() >= ENDED_SENDS {
+                    st.ended_sends.remove(0);
+                }
+                st.ended_sends.push(readings);
+            }
+        }
         st.serving.retain(|s| !(s.from == from && s.sid == sid));
         if !st.serving.iter().any(|s| s.from == from) {
             st.turns.remove(&from);
@@ -1339,13 +1383,33 @@ impl Direct {
                     "phase": live.as_ref().map(|l| format!("{:?}", l.phase)),
                     "relayed": live.as_ref().map(|l| l.relayed),
                     "tries": live.as_ref().map(|l| l.tries),
+                    "medidas": live.as_ref().map(|l| {
+                        l.readings.lock().unwrap_or_else(PoisonError::into_inner).clone()
+                    }),
                 })
             })
+            .collect();
+        let sends: Vec<Value> = st
+            .ended_sends
+            .iter()
+            .cloned()
+            .chain(
+                st.serving
+                    .iter()
+                    .map(|s| {
+                        s.readings
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone()
+                    })
+                    .filter(|r| !r.is_null()),
+            )
             .collect();
         json!({
             "me": me, "shared": shared, "downloads": downloads,
             "serving": st.serving.len(),
             "completed": self.completed.load(Ordering::Relaxed),
+            "medidasEnvios": sends,
         })
     }
 }

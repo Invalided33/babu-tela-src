@@ -39,9 +39,22 @@ Com `build/cloudflare.json` configurado para o Worker, use um dos comandos abaix
 | `cargo xtask chamada --pessoas 3 --tela --anotar` | O áudio de teste chega aos demais apps e os participantes recebem os traços sobre a tela, inclusive quem entra depois |
 | `cargo xtask chamada --pessoas 2 --calado --so-tcp` | Uma pessoa permanece em silêncio e o áudio da outra passa pelo relé TCP/TLS |
 | `cargo xtask direto --mb 200` | O segundo app baixa um arquivo do primeiro, pausa, retoma e compara o resultado byte a byte |
+| `cargo xtask direto --rede atraso=20,perda=0.1` | O mesmo por uma linha de teste com 40 ms de ida e volta e 0,1% de perda, com a tabela de cada segundo da conexão |
 | `cargo xtask medir arquivos` | Mede upload e download via servidor com 64 MiB e compara o arquivo enviado pelo próprio app com a cópia baixada e decifrada por ele |
 
-`chamada` abre de duas a seis cópias do cliente na área de trabalho. Aceita `--segundos` de 10 a 90 (padrão 20), `--janela "Título"`, `--placa` para testar a captura pela GPU, ou `--apresentar "C:\dados\slides.pptx"` para apresentar um PPTX ou PDF. `--anotar` requer pelo menos três participantes e uma tela, janela ou apresentação. `direto` também aceita `--so-tcp`. Os cenários com relé exigem TURN e consomem tráfego do serviço. Nos dois comandos e em `medir`, `--exe target\release\babutela.exe` usa um cliente previamente compilado. [Chamada](../crates/xtask/src/call.rs) · [Transferência direta](../crates/xtask/src/direto.rs)
+`chamada` abre de duas a seis cópias do cliente na área de trabalho. Aceita `--segundos` de 10 a 90 (padrão 20), `--janela "Título"`, `--placa` para testar a captura pela GPU, ou `--apresentar "C:\dados\slides.pptx"` para apresentar um PPTX ou PDF. `--anotar` requer pelo menos três participantes e uma tela, janela ou apresentação. Os cenários com relé exigem TURN e consomem tráfego do serviço. Nos dois comandos e em `medir`, `--exe target\release\babutela.exe` usa um cliente previamente compilado. [Chamada](../crates/xtask/src/call.rs) · [Transferência direta](../crates/xtask/src/direto.rs)
+
+### Diagnosticar a velocidade do envio direto
+
+Os dois apps do `direto` rodam no mesmo PC, onde nada se atrasa nem se perde. Para reproduzir a internet entre duas casas, `--rede` coloca uma linha de teste nos sockets WebRTC de cada app: `atraso` é o atraso de ida em ms, `perda` é a porcentagem de pacotes perdidos ao acaso, `banda` é o upload em Mbit/s e `fila` é o tamanho da fila antes dele, em ms. `--rede-ana` e `--rede-beto` valem para um lado só (Ana envia). `--so-rele` passa só pelo TURN por UDP, como em **Esconder meu IP**, e `--so-tcp` só pelo relé TCP/TLS. `--sem-pausa` faz a transferência inteira sem a pausa no meio.
+
+```powershell
+cargo xtask direto --mb 300 --sem-pausa --rede atraso=20,perda=0.1
+cargo xtask direto --mb 300 --sem-pausa --rede atraso=20 --rede-ana atraso=20,banda=100,fila=50
+cargo xtask direto --mb 300 --sem-pausa --so-rele
+```
+
+Cada app mede seu lado da conexão a cada segundo. O teste imprime os totais dos dois lados e uma tabela do envio, com a velocidade, o estado do controle de congestionamento, a banda que ele mediu, a janela, os bytes em trânsito, o tempo de ida e volta, as perdas, os reenvios, os timeouts e o tempo que o envio esperou pela rede. O app instalado grava os totais de cada transferência, uma linha JSON por envio ou download, em `%LOCALAPPDATA%\Prosa\direto\medidas.log`. Com `BABUTELA_DIRETO_LOG=1`, cada segundo também vai para o log do processo. [Medidor](../crates/app/src/direct/meter.rs) · [Linha de teste](../crates/app/src/voice/netem.rs) · [Controle de congestionamento](../vendor/rtc-sctp/src/association/bbr.rs)
 
 ## Medições
 

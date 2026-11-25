@@ -10,7 +10,7 @@ resolver = "3"
 members = ["crates/buildinfo", "crates/app", "crates/denoise", "crates/setup", "crates/xtask"]
 # What is in vendor/ are dependencies (see [patch.crates-io]), not ours to
 # test.
-exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/saturating-time", "vendor/tor-dirclient"]
+exclude = ["crates/worker", "vendor/rtc", "vendor/rtc-dtls", "vendor/rtc-sctp", "vendor/saturating-time", "vendor/tor-dirclient"]
 
 # The version lives only here: the app, the server and the installer read it.
 [workspace.package]
@@ -186,6 +186,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Globalization",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    "Win32_Media",
     "Win32_Security",
     "Win32_Security_Cryptography",
     "Win32_Storage_Xps",
@@ -214,6 +215,12 @@ windows-sys = { version = "0.61.2", features = [
 # the secret down to it. This one is ours: both stay until a release of
 # webrtc-rs mixes in such a secret itself.
 #
+# And the SCTP under the data channels, with BBR for the sending side (the
+# files sent directly ask for it; Reno, the RFC's, stays everyone else's)
+# and its state in getStats: with Reno, one packet in a thousand lost at a
+# 40 ms round trip held a file near 1.5 MB/s. Why and how is at the top of
+# vendor/rtc-sctp/Cargo.toml.
+#
 # And two pieces of Arti (the Tor inside the app). Its directory client,
 # whose downloads now time out after 10 s without a byte instead of 10 s in
 # all: below some 150 KB/s the consensus never finished. And saturating-time,
@@ -225,6 +232,7 @@ windows-sys = { version = "0.61.2", features = [
 [patch.crates-io]
 rtc = { path = "vendor/rtc" }
 rtc-dtls = { path = "vendor/rtc-dtls" }
+rtc-sctp = { path = "vendor/rtc-sctp" }
 tor-dirclient = { path = "vendor/tor-dirclient" }
 saturating-time = { path = "vendor/saturating-time" }
 

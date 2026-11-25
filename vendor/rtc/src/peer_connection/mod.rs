@@ -309,7 +309,8 @@ use crate::rtp_transceiver::{
 };
 use crate::statistics::StatsSelector;
 use crate::statistics::accumulator::RTCStatsAccumulator;
-use crate::statistics::report::RTCStatsReport;
+use crate::statistics::report::{RTCStatsReport, RTCStatsReportEntry};
+use crate::statistics::stats::sctp_transport::RTCSctpTransportStats;
 use ::sdp::description::session::Origin;
 use ::sdp::util::ConnectionRole;
 use ice::AgentConfig;
@@ -2471,9 +2472,18 @@ impl RTCPeerConnection {
         self.update_ice_agent_stats(now);
         // Update codec stats from transceivers before taking snapshot
         self.update_codec_stats();
-        self.pipeline_context
+        let whole = matches!(selector, StatsSelector::None);
+        let mut report = self
+            .pipeline_context
             .stats
-            .snapshot_with_selector(now, selector)
+            .snapshot_with_selector(now, selector);
+        // Babu Tela: the SCTP association, as its congestion control stands.
+        if whole && let Some(c) = self.sctp_transport().congestion() {
+            report.push(RTCStatsReportEntry::SctpTransport(
+                RTCSctpTransportStats::new(now, c),
+            ));
+        }
+        report
     }
 }
 

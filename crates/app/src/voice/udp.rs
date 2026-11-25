@@ -98,6 +98,11 @@ impl webrtc::runtime::Runtime for Runtime {
         socket: std::net::UdpSocket,
     ) -> std::io::Result<Arc<dyn AsyncUdpSocket>> {
         roomy(&socket);
+        // Tests only: a line with a round trip, losses and an upload
+        // (netem.rs).
+        if let Some(netem) = super::netem::Netem::from_env() {
+            return super::netem::wrap(socket, netem);
+        }
         TokioRuntime.wrap_udp_socket(socket)
     }
 

@@ -1,0 +1,91 @@
+# rtc-sctp 0.21.1 as published on crates.io (the manifest cargo normalized
+# for it, without its examples and dev-dependencies, which only its own
+# repository builds), with what the Babu Tela app needs and upstream does not
+# have. The workspace's [patch.crates-io] puts it in place of the published
+# crate, for vendor/rtc and everything else alike. Its own tests run on a
+# copy with the dev-dependencies put back (assert_matches 1.5,
+# lazy_static 1.4) and a [workspace] table.
+#
+# BBR, for the sending side, when the transport asks for it
+# (`TransportConfig::with_congestion_control`; Reno stays the default, so
+# nothing changes for anyone who does not): src/association/bbr.rs, and in
+# src/association/mod.rs the delivery count its rate samples come from, the
+# pacer gating new data and retransmissions, RACK's loss detection (a chunk
+# sent a quarter of a round trip before one the peer has is lost), and a
+# 5 s ceiling on the retransmission timeout (src/association/timer.rs). Reno
+# halves its window on every loss and grows it back by a packet a round
+# trip: with SCTP's 1191-byte packets, a 40 ms round trip and one packet in
+# a thousand lost at random held a file sent directly near 1.5 MB/s, and
+# bursts of loss at Cloudflare's TURN turned into timeouts that stalled it.
+# The same line with BBR: 55 to 90 MB/s.
+#
+# And how the association's sending side stands, for getStats
+# (`Association::congestion`, src/association/stats.rs): the congestion
+# window, the peer's window, what is in flight and waiting, the round trip,
+# BBR's state, and the retransmissions by kind. vendor/rtc reports it as an
+# `sctp-transport` entry; the app's files sent directly measure themselves
+# with it (crates/app/src/direct/meter.rs).
+
+[package]
+edition = "2024"
+name = "rtc-sctp"
+version = "0.21.1"
+authors = ["Rain Liu <yliu@webrtc.rs>"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "RTC SCTP in Rust"
+homepage = "https://webrtc.rs"
+documentation = "https://docs.rs/rtc-sctp"
+readme = "README.md"
+keywords = [
+    "sansio",
+    "networking",
+    "protocols",
+]
+categories = ["network-programming"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/webrtc-rs/rtc"
+resolver = "2"
+
+[features]
+bench = []
+
+[lib]
+name = "rtc_sctp"
+path = "src/lib.rs"
+
+[dependencies.bytes]
+version = "1.12.0"
+
+[dependencies.crc32c]
+version = "0.6"
+
+[dependencies.log]
+version = "0.4.33"
+
+[dependencies.rand]
+version = "0.10.1"
+
+[dependencies.rustc-hash]
+version = "2"
+
+[dependencies.shared]
+version = "0.21.1"
+features = []
+default-features = false
+package = "rtc-shared"
+
+[dependencies.slab]
+version = "0.4.9"
+
+[dependencies.thiserror]
+version = "2.0.18"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+priority = 0
+check-cfg = ["cfg(fuzzing)"]

@@ -855,7 +855,41 @@ pub(crate) fn launch(
     measuring: bool,
     sound_from: Option<u32>,
 ) -> Result<Child> {
+    launch_with(
+        exe,
+        dir,
+        who,
+        header,
+        token,
+        steps,
+        tcp_only,
+        voice,
+        seconds,
+        measuring,
+        sound_from,
+        &[],
+    )
+}
+
+/// `launch`, with more of the app's environment (`env`: the test network
+/// of direto.rs, say).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_with(
+    exe: &PathBuf,
+    dir: &std::path::Path,
+    who: &str,
+    header: &str,
+    token: &str,
+    steps: &str,
+    tcp_only: bool,
+    voice: &str,
+    seconds: u64,
+    measuring: bool,
+    sound_from: Option<u32>,
+    env: &[(&str, String)],
+) -> Result<Child> {
     let mut cmd = Command::new(exe);
+    cmd.envs(env.iter().map(|(k, v)| (*k, v.as_str())));
     if let Some(pid) = sound_from {
         // The app's voice/loopback.rs: take this process's sound.
         cmd.env("BABUTELA_TESTE_SOM_DE", pid.to_string());

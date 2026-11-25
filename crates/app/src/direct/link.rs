@@ -8,8 +8,12 @@
 
 use std::sync::Arc;
 
-use rtc::peer_connection::configuration::setting_engine::SctpMaxMessageSize;
+use rtc::peer_connection::configuration::setting_engine::{
+    SctpCongestionControl, SctpMaxMessageSize,
+};
+use rtc::peer_connection::transport::RTCIceCandidateType;
 use rtc::statistics::StatsSelector;
+use rtc::statistics::report::{RTCStatsReport, RTCStatsReportEntry};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use webrtc::data_channel::{DataChannel, RTCDataChannelInit};
@@ -81,6 +85,8 @@ pub struct Link {
     /// The halves of the secret the DTLS mixes in, which the descriptions
     /// carry (e2e/dtls.rs).
     pq: Arc<DtlsSecret>,
+    /// Millisecond timers while the connection lives: its pacer needs them.
+    _timers: crate::winsys::FineTimers,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -99,6 +105,11 @@ impl Link {
         let settings = SettingEngineBuilder::new()
             .with_sctp_max_receive_buffer_size(RECEIVE_WINDOW)
             .with_sctp_max_message_size(SctpMaxMessageSize::Bounded(MAX_MESSAGE))
+            // A file goes at what the path delivers, not at what Reno's
+            // halving on every loss allows (vendor/rtc-sctp, bbr.rs): at a
+            // 40 ms round trip and one packet in a thousand lost, Reno held
+            // a transfer near 1.5 MB/s.
+            .with_sctp_congestion_control(SctpCongestionControl::Bbr)
             .with_dtls_extra_secret(pq.hook())
             .build();
         let pc = PeerConnectionBuilder::new()
@@ -129,6 +140,7 @@ impl Link {
             events,
             pending: Vec::new(),
             pq,
+            _timers: crate::winsys::FineTimers::hold(),
         })
     }
 
@@ -233,11 +245,61 @@ impl Link {
 
     /// Whether the connection goes through the relay (TURN), once it is up.
     pub async fn relayed(&self) -> bool {
-        let report = self
-            .pc
+        crate::voice::rtc::relayed(&self.stats().await)
+    }
+
+    /// Whether the data passes a relay at all: mine, or the other side's
+    /// (its relay candidate at the end of the pair). Either relay's limits
+    /// hold the transfer (serve.rs, RELAY_RATE).
+    pub async fn through_relay(&self) -> bool {
+        let report = self.stats().await;
+        let mut pair = None;
+        for entry in report.iter() {
+            if let RTCStatsReportEntry::Transport(t) = entry
+                && !t.selected_candidate_pair_id.is_empty()
+            {
+                pair = Some(t.selected_candidate_pair_id.clone());
+            }
+        }
+        let Some(pair) = pair.and_then(|id| {
+            report.iter().find_map(|e| match e {
+                RTCStatsReportEntry::IceCandidatePair(p) if p.stats.id == id => Some(p),
+                _ => None,
+            })
+        }) else {
+            return false;
+        };
+        // Candidates' own ids carry a prefix the pair's do not.
+        let bare = |id: &str| {
+            id.trim_start_matches("RTCLocalIceCandidate_")
+                .trim_start_matches("RTCRemoteIceCandidate_")
+                .to_owned()
+        };
+        let (local, remote) = (
+            bare(&pair.local_candidate_id),
+            bare(&pair.remote_candidate_id),
+        );
+        report.iter().any(|e| match e {
+            RTCStatsReportEntry::LocalCandidate(c) => {
+                c.candidate_type == RTCIceCandidateType::Relay && bare(&c.stats.id) == local
+            }
+            RTCStatsReportEntry::RemoteCandidate(c) => {
+                c.candidate_type == RTCIceCandidateType::Relay && bare(&c.stats.id) == remote
+            }
+            _ => false,
+        })
+    }
+
+    async fn stats(&self) -> RTCStatsReport {
+        self.pc
             .get_stats(std::time::Instant::now(), StatsSelector::None)
-            .await;
-        crate::voice::rtc::relayed(&report)
+            .await
+    }
+
+    /// The connection itself, for its meter (meter.rs), which reads its
+    /// statistics beside the transfer.
+    pub fn peer(&self) -> Arc<dyn PeerConnection> {
+        self.pc.clone()
     }
 
     pub async fn close(&self) {

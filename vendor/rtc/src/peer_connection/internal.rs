@@ -139,13 +139,14 @@ impl RTCPeerConnection {
         })?;
 
         // Create the SCTP transport
-        let sctp_transport = SctpTransport::new(
+        let mut sctp_transport = SctpTransport::new(
             setting_engine.sctp_max_message_size,
             setting_engine.sctp_max_receive_buffer_size,
             setting_engine.sctp_mtu,
             sctp_transport_id,
             dtls_transport_id,
         );
+        sctp_transport.congestion_control = setting_engine.sctp_congestion_control;
 
         // Create Pipeline Context
         let ice_handler_context = IceHandlerContext::new(ice_transport);

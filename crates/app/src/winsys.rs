@@ -209,6 +209,56 @@ impl Drop for Com {
     }
 }
 
+/// While one is held, this process's timers are good to a millisecond
+/// (timeBeginPeriod; per process since Windows 10 2004). Windows' default
+/// is 15.6 ms, and tokio's sleeps round up to it: a 1 ms wait took 15.5 ms
+/// here. A file sent directly paces its packets (vendor/rtc-sctp, bbr.rs)
+/// and needs the finer ones while it goes; the rest of the time the PC
+/// sleeps as it would.
+pub struct FineTimers;
+
+impl FineTimers {
+    pub fn hold() -> FineTimers {
+        use std::sync::Once;
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+            PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION, PROCESS_POWER_THROTTLING_STATE,
+            ProcessPowerThrottling, SetProcessInformation,
+        };
+        // Windows 11 ignores the request while no window of the process is
+        // visible (minimized, in the tray: where a long download waits)
+        // unless the process asks it not to.
+        static HONORED: Once = Once::new();
+        HONORED.call_once(|| {
+            let state = PROCESS_POWER_THROTTLING_STATE {
+                Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask: PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+                StateMask: 0,
+            };
+            // SAFETY: the state lives through the call and its size is
+            // the one given; failing (older Windows) changes nothing.
+            unsafe {
+                SetProcessInformation(
+                    GetCurrentProcess(),
+                    ProcessPowerThrottling,
+                    std::ptr::from_ref(&state).cast(),
+                    size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+                );
+            }
+        });
+        // SAFETY: plain call; matched by timeEndPeriod in Drop.
+        unsafe { windows_sys::Win32::Media::timeBeginPeriod(1) };
+        FineTimers
+    }
+}
+
+impl Drop for FineTimers {
+    fn drop(&mut self) {
+        // SAFETY: matches the timeBeginPeriod in `hold`.
+        unsafe { windows_sys::Win32::Media::timeEndPeriod(1) };
+    }
+}
+
 // ---------------------------------------------------------------- messages
 
 /// Asks yes or no before the window exists. True for yes.

@@ -29,6 +29,8 @@ Na caixa de mensagem, **Ctrl+V** anexa os arquivos copiados no Explorador de Arq
 
 Para usar **Enviar direto**, anexe os arquivos e marque a opção embaixo da lista antes de enviar. Ela vale para todos os anexos daquela mensagem. O app calcula os hashes antes de disponibilizar o arquivo e verifica cada pedaço que chega. Mantenha o original no mesmo lugar até terminar de compartilhar. O cartão permite pausar, continuar ou cancelar o download, e mostra se os PCs estão usando o relé. Quem enviou pode interromper a distribuição com **Parar de compartilhar** ou apagando a mensagem.
 
+Numa conexão direta, a velocidade depende do upload de quem envia e do download de quem recebe. A transferência mantém a velocidade da linha mesmo com perdas ocasionais de pacotes, comuns no Wi-Fi e em rotas longas. Pelo relé, o envio fica limitado a cerca de 5,5 MB/s, abaixo do que o TURN da Cloudflare aceita por conexão. Os totais de cada transferência ficam em `medidas.log`, na pasta dos arquivos diretos. O arquivo mostra a velocidade, o caminho usado, o tempo de ida e volta, as perdas e se a espera foi pela rede ou pelo disco.
+
 **Baixar** abre um diálogo para escolher o destino. Durante a transferência, o app grava um arquivo com o sufixo `.parcial` e só atribui o nome escolhido depois da conferência. No envio direto, os pedaços já verificados podem ser retomados. O Windows recebe a marca de arquivo vindo da internet. Ao terminar, use **Abrir** ou **Mostrar na pasta**.
 
 Para usar uma imagem da conversa em outro programa, passe o mouse sobre ela e clique no botão de copiar, ou clique nela com o botão direito e escolha **Copiar imagem**. O app coloca a imagem decifrada na área de transferência do Windows, com a transparência, pronta para colar com Ctrl+V. [Área de transferência](../crates/app/src/clip.rs)
@@ -66,7 +68,7 @@ As ferramentas ficam em `%USERPROFILE%\.babutela\yt-dlp`. O app confere o SHA-25
 | --- | --- |
 | `%APPDATA%\Prosa` | Configurações (`settings.json`), preferências (`prefs.json`), sessão protegida (`session.bin`), chaves e registro de identidades por conta. O nome da pasta vem da versão antiga do app. |
 | `%APPDATA%\Prosa\cache` e `%APPDATA%\Prosa\tor` | Imagens em cache, arquivos de emoji e, ao usar Tor, dados locais do Arti. O cache conserva as imagens cifradas como vieram do servidor. |
-| `%LOCALAPPDATA%\Prosa\direto` | Índice dos arquivos compartilhados por este PC, dos downloads diretos e de seu progresso. |
+| `%LOCALAPPDATA%\Prosa\direto` | Índice dos arquivos compartilhados por este PC, dos downloads diretos e de seu progresso, e as medidas de cada transferência (`medidas.log`, até 512 KB, mais uma cópia anterior). |
 | `%LOCALAPPDATA%\Prosa\colados` | Imagens coladas com Ctrl+V à espera do envio. O app apaga cada uma quando a mensagem chega ao servidor ou quando o anexo é retirado. Uma imagem colada e enviada direto fica disponível por 30 dias. Depois desse prazo, o app apaga as que sobraram. |
 | `%LOCALAPPDATA%\Prosa\updates` | Instalador preparado para atualização e seu estado de verificação. |
 | `%TEMP%\babutela-arquivos` e `%TEMP%\babutela-midia` | Cópias decifradas de anexos abertos em outros programas e de vídeos em reprodução, respectivamente. |

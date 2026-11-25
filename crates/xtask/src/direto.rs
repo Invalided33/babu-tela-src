@@ -9,7 +9,18 @@
 //!                                   on a network without UDP (it goes
 //!                                   through Cloudflare's TURN, which counts
 //!                                   against its free 1000 GB a month)
-//!   cargo xtask direto --exe target\release\babutela.exe
+//!   cargo xtask direto --so-rele    only through the relay over UDP, as
+//!                                   "Esconder meu IP" goes (Cloudflare's
+//!                                   TURN too)
+//!   cargo xtask direto --rede atraso=20,perda=0.1,banda=100
+//!                                   both apps behind a test line (the app's
+//!                                   voice/netem.rs: one-way delay in ms,
+//!                                   percent lost, upload in Mbit/s, and
+//!                                   `fila`, its queue in ms)
+//!   --rede-ana SPEC, --rede-beto SPEC
+//!                                   one side's line only (Ana sends)
+//!   --sem-pausa                     straight through, no pause half-way
+//!   --exe target\release\babutela.exe
 //!                                   with an app already built
 //!
 //! Ana attaches the file with "Enviar direto" on and sends it: the message
@@ -18,22 +29,39 @@
 //! byte; Ana's app stays open until it has gone out whole. The app is built
 //! optimized (as `medir` builds it): a debug build's WebRTC moves a couple
 //! of MB a second, which says nothing.
+//!
+//! Both apps measure their side of the connection every second (the app's
+//! direct/meter.rs: SCTP's congestion window and round trip, its
+//! retransmissions, what each waited on): the seconds and the totals are
+//! printed at the end, so a slow transfer says why it is slow.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::call::{launch, wait};
+use crate::call::{launch_with, wait};
 use crate::e2e::T;
 use crate::tools::{self, block_on, root};
 use crate::{Result, cf, fail};
 
+/// The way the connection is made.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Way {
+    Direct,
+    RelayUdp,
+    RelayTcp,
+}
+
 pub fn run(args: &[String]) -> Result {
     let mut mb = 200u64;
-    let mut tcp_only = false;
+    let mut way = Way::Direct;
     let mut given_exe: Option<PathBuf> = None;
+    let mut both: Option<String> = None;
+    let mut lines: [Option<String>; 2] = [None, None];
+    let mut pause = true;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -44,12 +72,24 @@ pub fn run(args: &[String]) -> Result {
                     .filter(|n| (1..=100_000).contains(n))
                     .ok_or("--mb quer um número de 1 a 100000")?;
             }
-            "--so-tcp" => tcp_only = true,
+            "--so-tcp" => way = Way::RelayTcp,
+            "--so-rele" => way = Way::RelayUdp,
+            "--sem-pausa" => pause = false,
+            "--rede" => both = Some(rest.next().ok_or("--rede quer a linha")?.clone()),
+            "--rede-ana" => lines[0] = Some(rest.next().ok_or("--rede-ana quer a linha")?.clone()),
+            "--rede-beto" => {
+                lines[1] = Some(rest.next().ok_or("--rede-beto quer a linha")?.clone());
+            }
             "--exe" => {
                 let path = rest.next().ok_or("--exe quer o caminho do app")?;
                 given_exe = Some(PathBuf::from(path));
             }
             other => fail!("opção desconhecida: {other}"),
+        }
+    }
+    for line in &mut lines {
+        if line.is_none() {
+            line.clone_from(&both);
         }
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -95,51 +135,68 @@ pub fn run(args: &[String]) -> Result {
     let sha = write_noise(&file, mb << 20)?;
     let size = mb << 20;
 
-    // Long enough for the slowest way (the relay over TCP, a few MB/s) and
-    // a margin.
-    let limit = 120 + mb / 2;
+    // Long enough for a slow line (a few MB/s, or less on a bad test line)
+    // and a margin.
+    let limit = 120 + mb * 2;
     let ana = format!(
         "go:first-server|direto:on|attach:{}|send:|wait-sent:{limit}|mark:enviado|wait-servido:1:{limit}|wait:3000",
         file.display()
     );
-    let beto = format!(
-        "go:first-server|wait-direto-msg:120|mark:ini|baixar:{}|wait-direto-pct:50:{limit}|mark:meio|pausar-direto|wait:3000|note:pausado|mark:volta|continuar-direto|wait-direto:{limit}|mark:fim|wait:2000",
-        into.display()
-    );
-    let how = if tcp_only {
-        "só pelo relé TCP/TLS"
+    // The pause right as half has come (the steps go 1.5 s apart; a fast
+    // line would be done by the next one).
+    let beto = if pause {
+        format!(
+            "go:first-server|wait-direto-msg:120|mark:ini|baixar:{}|wait-direto-pct:50:{limit}|pausar-direto|mark:meio|wait:3000|note:pausado|mark:volta|continuar-direto|wait-direto:{limit}|mark:fim|wait:2000",
+            into.display()
+        )
     } else {
-        "direto entre os apps"
+        format!(
+            "go:first-server|wait-direto-msg:120|mark:ini|baixar:{}|wait-direto:{limit}|mark:fim|wait:2000",
+            into.display()
+        )
     };
-    println!("==> Ana envia direto, Beto baixa ({how})");
+    let how = match way {
+        Way::Direct => "direto entre os apps",
+        Way::RelayUdp => "só pelo relé UDP",
+        Way::RelayTcp => "só pelo relé TCP/TLS",
+    };
+    let line_of = |i: usize| lines[i].as_deref().unwrap_or("sem rede de teste");
+    println!(
+        "==> Ana envia direto, Beto baixa ({how}; Ana: {}; Beto: {})",
+        line_of(0),
+        line_of(1)
+    );
     let seconds = limit + 60;
-    let mut children = vec![launch(
-        &exe,
-        &dir,
-        "ana",
-        &t.header,
-        &room.tokens[0],
-        &ana,
-        tcp_only,
-        "silencio",
-        seconds,
-        false,
-        None,
-    )?];
-    std::thread::sleep(Duration::from_secs(2));
-    children.push(launch(
-        &exe,
-        &dir,
-        "beto",
-        &t.header,
-        &room.tokens[1],
-        &beto,
-        tcp_only,
-        "silencio",
-        seconds,
-        false,
-        None,
-    )?);
+    let env_of = |i: usize| {
+        let mut env: Vec<(&str, String)> = vec![("BABUTELA_DIRETO_LOG", "1".into())];
+        if let Some(line) = &lines[i] {
+            env.push(("BABUTELA_REDE_TESTE", line.clone()));
+        }
+        if way == Way::RelayUdp {
+            env.push(("BABUTELA_TURN_SO_UDP", "1".into()));
+        }
+        env
+    };
+    let mut children = Vec::new();
+    for (i, (who, steps)) in [("ana", &ana), ("beto", &beto)].into_iter().enumerate() {
+        if i > 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        children.push(launch_with(
+            &exe,
+            &dir,
+            who,
+            &t.header,
+            &room.tokens[i],
+            steps,
+            way == Way::RelayTcp,
+            "silencio",
+            seconds,
+            false,
+            None,
+            &env_of(i),
+        )?);
+    }
     let wait_for = Duration::from_secs(seconds + 120);
     let mut reports = Vec::new();
     for (child, who) in children.iter_mut().zip(["ana", "beto"]) {
@@ -179,33 +236,40 @@ pub fn run(args: &[String]) -> Result {
     if ana["direct"]["completed"].as_u64().unwrap_or(0) < 1 {
         problems.push("o envio da Ana não terminou inteiro".into());
     }
-    // Paused half-way, as it was asked.
-    let paused = &beto["notes"]["pausado"]["direct"]["downloads"][0];
-    let at = paused["done"].as_u64().unwrap_or(0);
-    println!(
-        "    Beto pausou com {} de {} ({}%), {}",
-        tools::mb(at),
-        tools::mb(size),
-        at * 100 / size.max(1),
-        if paused["relayed"] == true {
-            "pelo relé"
-        } else {
-            "direto"
-        }
-    );
-    if paused["state"] != "paused" || at < size / 2 {
-        problems.push(format!("o download não estava pausado na metade: {paused}"));
-    }
-    if (paused["relayed"] == true) != tcp_only {
-        problems.push(format!(
-            "a conexão foi {}, esperava {}",
+    let relayed_wanted = way != Way::Direct;
+    if pause {
+        // Paused half-way, as it was asked.
+        let paused = &beto["notes"]["pausado"]["direct"]["downloads"][0];
+        let at = paused["done"].as_u64().unwrap_or(0);
+        println!(
+            "    Beto pausou com {} de {} ({}%), {}",
+            tools::mb(at),
+            tools::mb(size),
+            at * 100 / size.max(1),
             if paused["relayed"] == true {
                 "pelo relé"
             } else {
-                "direta"
-            },
-            if tcp_only { "pelo relé" } else { "direta" }
-        ));
+                "direto"
+            }
+        );
+        if paused["state"] != "paused" || at < size / 2 {
+            problems.push(format!("o download não estava pausado na metade: {paused}"));
+        }
+        if (paused["relayed"] == true) != relayed_wanted {
+            problems.push(format!(
+                "a conexão foi {}, esperava {}",
+                if paused["relayed"] == true {
+                    "pelo relé"
+                } else {
+                    "direta"
+                },
+                if relayed_wanted {
+                    "pelo relé"
+                } else {
+                    "direta"
+                }
+            ));
+        }
     }
     // Whole, and the same.
     let got = &beto["direct"]["downloads"][0];
@@ -229,14 +293,36 @@ pub fn run(args: &[String]) -> Result {
     }
     // How fast, without the pause.
     let mark = |m: &str| beto["marks"][m].as_f64();
-    if let (Some(ini), Some(meio), Some(volta), Some(fim)) =
-        (mark("ini"), mark("meio"), mark("volta"), mark("fim"))
-    {
-        let secs = ((meio - ini) + (fim - volta)) / 1000.0;
+    let secs = match (mark("ini"), mark("meio"), mark("volta"), mark("fim")) {
+        (Some(ini), Some(meio), Some(volta), Some(fim)) => {
+            Some(((meio - ini) + (fim - volta)) / 1000.0)
+        }
+        (Some(ini), _, _, Some(fim)) if !pause => Some((fim - ini) / 1000.0),
+        _ => None,
+    };
+    if let Some(secs) = secs {
         println!(
-            "    {mb} MB em {secs:.1} s, sem a pausa: {:.1} MB/s",
+            "    {mb} MB em {secs:.1} s{}: {:.1} MB/s",
+            if pause { ", sem a pausa" } else { "" },
             mb as f64 / secs.max(0.001)
         );
+    }
+    // How each side's connection went.
+    let sends = ana["direct"]["medidasEnvios"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let fetched = &got["medidas"];
+    for (who, m) in [
+        ("Ana (envio)", sends.last()),
+        ("Beto (download)", Some(fetched)),
+    ] {
+        if let Some(r) = m.map(|m| &m["resumo"]).filter(|r| !r.is_null()) {
+            println!("    {who}: {r}");
+        }
+    }
+    if let Some(last) = sends.last() {
+        timeline(&last["segundos"]);
     }
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_file(&path);
@@ -245,6 +331,60 @@ pub fn run(args: &[String]) -> Result {
     }
     println!("O envio direto funcionou ({how}).");
     Ok(())
+}
+
+/// The sender's seconds, a few lines' worth: how fast, SCTP's window and
+/// round trip, and the losses it saw.
+fn timeline(seconds: &Value) {
+    let Some(list) = seconds.as_array().filter(|l| !l.is_empty()) else {
+        return;
+    };
+    let every = list.len().div_ceil(30).max(1);
+    println!(
+        "    {:>6} {:>7} {:>9} {:>7} {:>8} {:>8} {:>6} {:>6} {:>6} {:>6} {:>4} {:>5}",
+        "t (s)",
+        "MB/s",
+        "controle",
+        "banda",
+        "janela",
+        "no ar",
+        "srtt",
+        "rttmin",
+        "perdas",
+        "reenv",
+        "t3",
+        "rede%"
+    );
+    for chunk in list.chunks(every) {
+        let last = &chunk[chunk.len() - 1];
+        let sum = |k: &str| chunk.iter().filter_map(|s| s[k].as_u64()).sum::<u64>();
+        let mean = |k: &str| {
+            let v: Vec<f64> = chunk.iter().filter_map(|s| s[k].as_f64()).collect();
+            if v.is_empty() {
+                0.0
+            } else {
+                v.iter().sum::<f64>() / v.len() as f64
+            }
+        };
+        let kb = |k: &str| format!("{:.0}K", mean(k));
+        println!(
+            "    {:>6} {:>7.2} {:>9} {:>7.2} {:>8} {:>8} {:>6.0} {:>6.1} {:>6} {:>6} {:>4} {:>4.0}%",
+            last["t"]
+                .as_f64()
+                .map_or_else(|| "?".into(), |t| format!("{t:.0}")),
+            mean("mbs"),
+            last["controle"].as_str().unwrap_or("?"),
+            mean("banda_mbs"),
+            kb("janela_kb"),
+            kb("no_ar_kb"),
+            mean("srtt_ms"),
+            mean("rtt_min_ms"),
+            sum("perdidos") + sum("recuperacoes"),
+            sum("reenvios_rapidos") + sum("reenvios"),
+            sum("timeouts"),
+            mean("rede_pct"),
+        );
+    }
 }
 
 /// Writes `len` bytes of noise (which no step along the way can shrink) to

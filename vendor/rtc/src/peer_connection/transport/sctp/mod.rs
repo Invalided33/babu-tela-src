@@ -51,6 +51,9 @@ pub(crate) struct SctpTransport {
     // `EndpointConfig` in `start()`. None uses the sctp crate default (INITIAL_MTU, 1191).
     pub(crate) mtu: Option<u32>,
 
+    // Babu Tela: the sending side's congestion control (Reno by default).
+    pub(crate) congestion_control: ::sctp::CongestionControl,
+
     pub(crate) internal_buffer: Vec<u8>,
 }
 
@@ -74,6 +77,7 @@ impl SctpTransport {
             negotiated_max_message_size: None,
             max_receive_buffer_size,
             mtu,
+            congestion_control: ::sctp::CongestionControl::default(),
             internal_buffer: vec![],
         }
     }
@@ -125,6 +129,12 @@ impl SctpTransport {
     /// [RFC 8841 §6]: https://datatracker.ietf.org/doc/html/rfc8841#section-6
     pub(crate) fn max_message_size(&self) -> Option<u32> {
         self.negotiated_max_message_size
+    }
+
+    /// The association's congestion control as it stands, once there is one
+    /// (Babu Tela; getStats reports it).
+    pub(crate) fn congestion(&self) -> Option<::sctp::Congestion> {
+        self.association().map(Association::congestion)
     }
 
     /// W3C `SctpTransport.maxChannels`: the minimum of the negotiated inbound and outbound
@@ -181,7 +191,8 @@ impl SctpTransport {
         }
         let mut sctp_transport_config = ::sctp::TransportConfig::default()
             .with_max_message_size(max_message_size)
-            .with_sctp_port(local_port);
+            .with_sctp_port(local_port)
+            .with_congestion_control(self.congestion_control);
         if let Some(recv_buf) = self.max_receive_buffer_size {
             sctp_transport_config = sctp_transport_config.with_max_receive_buffer_size(recv_buf);
         }

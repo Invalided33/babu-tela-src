@@ -272,6 +272,10 @@ fn video_codec(codec: Codec) -> RTCRtpCodecParameters {
 /// and nothing direct, so a call that connects at all went through it.
 const TCP_ONLY_ENV: &str = "BABUTELA_TURN_SO_TCP";
 
+/// For tests of the relay over UDP (as "Esconder meu IP" goes on most
+/// networks): only the TURN servers over UDP, and nothing direct.
+const UDP_RELAY_ONLY_ENV: &str = "BABUTELA_TURN_SO_UDP";
+
 /// "Esconder meu IP" (the settings): the connections made from now on, of
 /// calls and of files sent directly, offer only the relay's addresses, so
 /// the people on the other end see the relay's IP instead of this PC's.
@@ -329,6 +333,11 @@ pub(crate) fn ice_servers(
             urls: vec![FALLBACK_STUN.into()],
             ..Default::default()
         });
+    }
+    // Tests of the relay over UDP: only the TURN servers this stack reaches
+    // itself, nothing direct and nothing over TCP.
+    if std::env::var_os(UDP_RELAY_ONLY_ENV).is_some_and(|v| v == "1") {
+        return (out, RTCIceTransportPolicy::Relay);
     }
     out.extend_from_slice(relay);
     let hide = HIDE_IP.load(Ordering::Relaxed);

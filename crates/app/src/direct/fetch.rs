@@ -27,6 +27,7 @@ use webrtc::peer_connection::RTCPeerConnectionState;
 
 use super::hash::{self, Hash};
 use super::link::{Link, LinkEv};
+use super::meter::{Meter, Readings};
 use super::wire::{self, Said, Stop};
 use super::{Direct, Halt, Phase};
 use crate::voice::relay::Relay;
@@ -37,6 +38,13 @@ pub(super) const SETUP: Duration = Duration::from_secs(30);
 
 /// How often what was written is made sure on the disk, and noted.
 const CHECKPOINT: Duration = Duration::from_secs(5);
+
+/// Once it is all here, how long the sender has to close after hearing so.
+const GOT_WAIT: Duration = Duration::from_secs(2);
+
+/// The file flowing, nothing more for this long: the connection is gone,
+/// whatever ICE says, and the next attempt goes on from what is here.
+pub(super) const STALL: Duration = Duration::from_secs(60);
 
 /// Chunks waiting for the disk (64 KiB each).
 const QUEUE: usize = 64;
@@ -64,6 +72,8 @@ pub(super) struct Job {
     pub disk: Arc<tokio::sync::Mutex<()>>,
     pub halt: watch::Receiver<Halt>,
     pub signals: mpsc::UnboundedReceiver<Value>,
+    /// How the connection goes, for the report (meter.rs).
+    pub readings: Readings,
 }
 
 /// How an attempt ended.
@@ -184,6 +194,15 @@ async fn talk(
     // Where the next byte of the file goes.
     let mut next = (start * job.piece).min(job.size);
     let mut receiving = false;
+    let meter = Meter::start(
+        "download",
+        job.readings.clone(),
+        link.peer(),
+        job.done.clone(),
+        Some(d.measurements()),
+    );
+    let stalled = tokio::time::sleep(STALL);
+    tokio::pin!(stalled);
     let out = loop {
         tokio::select! {
             ev = link.events.recv() => match ev {
@@ -239,7 +258,9 @@ async fn talk(
                         receiving = true;
                         let relayed = link.relayed().await;
                         d.set_phase(&job.file, &job.sid, Phase::Receiving, Some(relayed));
+                        meter.gauge.flowing();
                     }
+                    stalled.as_mut().reset(tokio::time::Instant::now() + STALL);
                     let bytes = m.data.freeze().slice(wire::HEADER..);
                     if kind == wire::HASHES {
                         // Only when asked for, in order, and no more than
@@ -281,7 +302,11 @@ async fn talk(
                         break broken(&format!("{len} bytes em {offset}, esperados em {next}"));
                     }
                     next += len as u64;
-                    if !w.write(bytes).await {
+                    // A full queue is the disk holding the download up.
+                    let handing = std::time::Instant::now();
+                    let written = w.write(bytes).await;
+                    meter.gauge.waited_on_disk(handing.elapsed());
+                    if !written {
                         // It stopped: why is in what it returns.
                         break Out::End(cut("o disco parou"));
                     }
@@ -296,15 +321,32 @@ async fn talk(
                     End::NoAnswer
                 });
             }
+            () = &mut stalled, if receiving => break Out::End(cut("nada chegou em 60 s")),
             _ = job.halt.changed() => break Out::End(End::Halted),
         }
     };
+    // Stopped here (paused, cancelled, quitting): the sender hears so
+    // (wire::bye) and stops sending into a connection about to close, a
+    // moment given for it to close first.
+    if open && matches!(out, Out::End(End::Halted)) {
+        let _ = tokio::time::timeout(GOT_WAIT, async {
+            if channel.send_text(&wire::bye().to_string()).await.is_ok() {
+                while !matches!(channel.poll().await, Some(DataChannelEvent::OnClose) | None) {}
+            }
+        })
+        .await;
+    }
     // The writer ends with what it has: its pieces count, whatever ended it.
     let (verified, failed) = match writer.take() {
         Some(w) => w.close(start).await,
         None => (start, None),
     };
     drop(file);
+    let name = job
+        .path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    meter.finish(format!("{name} de {}", job.from)).await;
     let progressed = verified > start;
     match failed {
         Some(Failed::Disk(e)) => return End::Disk(e),
@@ -317,7 +359,18 @@ async fn talk(
         None => {}
     }
     match out {
-        Out::Done if verified == count => finish(job),
+        Out::Done if verified == count => {
+            // The sender hears it is all here (wire::got) and closes; a
+            // moment for that, so the close is the sender's and nothing of
+            // it is cut off.
+            if channel.send_text(&wire::got().to_string()).await.is_ok() {
+                let _ = tokio::time::timeout(GOT_WAIT, async {
+                    while !matches!(channel.poll().await, Some(DataChannelEvent::OnClose) | None) {}
+                })
+                .await;
+            }
+            finish(job)
+        }
         // "All out", with pieces missing.
         Out::Done => {
             crate::logln!("direto: o envio acabou com {verified} de {count} pedaços");

@@ -23,8 +23,17 @@
 # (vendor/rtc-dtls, `with_extra_secret`), which mixes it into the keys. The
 # app's is the post-quantum one its sealed signalling carries
 # (crates/app/src/e2e/dtls.rs). Without one (the default) nothing changes.
-# This folder and the patch can go only once a release of rtc carries both
-# the fix and a way to mix in such a secret.
+#
+# And two more for vendor/rtc-sctp's additions. The setting engine's
+# `with_sctp_congestion_control` (setting_engine.rs, internal.rs,
+# transport/sctp/mod.rs) hands the SCTP transport the congestion control
+# to use: Reno unless asked, BBR for the app's files sent directly. getStats
+# reports the association as it stands, an `sctp-transport` entry
+# (statistics/stats/sctp_transport.rs, statistics/report.rs, the end of
+# peer_connection/mod.rs): its window, round trip, BBR's state and the
+# retransmissions, which the app's direct/meter.rs reads every second.
+# This folder and the patch can go only once a release of rtc carries the
+# fix, a way to mix in such a secret, and those two.
 
 [package]
 edition = "2024"

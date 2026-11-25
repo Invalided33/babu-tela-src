@@ -21,9 +21,10 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use webrtc::data_channel::{DataChannel, DataChannelEvent};
 use webrtc::peer_connection::RTCPeerConnectionState;
 
-use super::fetch::SETUP;
+use super::fetch::{SETUP, STALL};
 use super::hash::{self, Hash};
 use super::link::{Link, LinkEv};
+use super::meter::{Gauge, Meter, Readings};
 use super::wire::{self, Said, Stop};
 use super::{Direct, Halt};
 use crate::voice::relay::Relay;
@@ -37,6 +38,56 @@ const LINGER_STOP: Duration = Duration::from_secs(5);
 
 /// Blocks read ahead of the connection (hash::BLOCK each).
 const AHEAD: usize = 2;
+
+/// Through the relay (TURN), at most this many bytes a second, in messages
+/// of RELAY_CHUNK. Cloudflare's TURN drops an allocation's packets above 5
+/// to 10 thousand a second and 50 to 100 Mbit/s, and one held above that
+/// went dark: with nothing holding it back, a send went at 34 MB/s for 8 s
+/// and then nothing more arrived; at 7.5 MB/s in bursts of 256 KiB (SCTP
+/// paces a burst at the rate BBR measured, 16 to 21 MB/s) it went dark for
+/// 15 s. 5.5 MB/s in small messages keeps under 5 thousand packets a second
+/// (`cargo xtask direto --so-rele`).
+const RELAY_RATE: f64 = 5.5e6;
+
+/// The messages through the relay, and what its limit lets go at once: a
+/// few milliseconds' worth, so SCTP never has a burst to send.
+const RELAY_CHUNK: usize = 16 * 1024;
+const RELAY_BURST: f64 = 2.0 * RELAY_CHUNK as f64;
+
+/// Holds the file to `rate` bytes a second, a block at a time.
+struct Throttle {
+    rate: f64,
+    credit: f64,
+    last: std::time::Instant,
+}
+
+impl Throttle {
+    fn new(rate: f64) -> Throttle {
+        Throttle {
+            rate,
+            credit: RELAY_BURST,
+            last: std::time::Instant::now(),
+        }
+    }
+
+    /// Waits until `n` more bytes may go.
+    async fn wait(&mut self, n: usize) {
+        let refill = |t: &mut Throttle| {
+            let now = std::time::Instant::now();
+            t.credit =
+                (t.credit + now.duration_since(t.last).as_secs_f64() * t.rate).min(RELAY_BURST);
+            t.last = now;
+        };
+        refill(self);
+        let need = n as f64;
+        if self.credit < need {
+            let secs = (need - self.credit) / self.rate;
+            tokio::time::sleep(Duration::from_secs_f64(secs)).await;
+            refill(self);
+        }
+        self.credit -= need;
+    }
+}
 
 pub(super) struct Job {
     /// Who asked, about which message, and their attempt's number.
@@ -61,6 +112,8 @@ pub(super) struct Job {
     /// Everyone's turns, and this person's.
     pub sends: Arc<Semaphore>,
     pub turn: Arc<Semaphore>,
+    /// How the connection goes, for the report (meter.rs).
+    pub readings: Readings,
 }
 
 fn refuse(d: &Direct, job: &Job, why: Stop) {
@@ -126,7 +179,9 @@ async fn say(channel: &Arc<dyn DataChannel>, v: &Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Sends, unless the send is stopped meanwhile.
+/// Sends, unless the send is stopped meanwhile. A send held STALL (the
+/// connection's buffer full and nothing of it acknowledged) is a connection
+/// gone, whatever ICE says: the turn goes to whoever is next.
 async fn put(
     channel: &Arc<dyn DataChannel>,
     halt: &mut watch::Receiver<Halt>,
@@ -135,6 +190,7 @@ async fn put(
     tokio::select! {
         r = channel.send(msg) => r.map_err(|e| Ended::Fell(e.to_string())),
         _ = halt.changed() => Err(Ended::Halted),
+        () = tokio::time::sleep(STALL) => Err(Ended::Fell("nada andou em 60 s".into())),
     }
 }
 
@@ -153,20 +209,46 @@ async fn send(
     list: Arc<Vec<Hash>>,
 ) -> Result<(), String> {
     let channel = link.channel.clone();
-    let ended = transfer(d, job, link, &channel, list).await;
-    let why = match ended {
+    let meter = Meter::start(
+        "envio",
+        job.readings.clone(),
+        link.peer(),
+        job.sent.clone(),
+        Some(d.measurements()),
+    );
+    let ended = transfer(d, job, link, &channel, list, &meter.gauge).await;
+    let name = job
+        .path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let what = format!("{name} para {}", job.from);
+    let ended = match ended {
         Ok(()) => {
-            linger(job, link, &channel, LINGER).await;
+            // Measured until it is all there, not only handed over.
+            let heard = linger(job, link, &channel, LINGER).await;
+            meter.finish(what).await;
+            // They stopped before it all got there (paused, say): not a
+            // whole send. A close counts as one, as an older app closes
+            // once it has it all, saying nothing.
+            if heard == Heard::Bye {
+                return Err("pararam de baixar antes do fim".into());
+            }
             return Ok(());
         }
-        Err(Ended::Fell(e)) => return Err(e),
-        Err(Ended::Halted) => match *job.halt.borrow() {
+        Err(e) => {
+            meter.finish(what).await;
+            e
+        }
+    };
+    let why = match ended {
+        Ended::Fell(e) => return Err(e),
+        Ended::Halted => match *job.halt.borrow() {
             // No longer shared.
             Halt::Cancel => Stop::Gone,
             // Signing out or quitting: back when I am.
             _ => Stop::Offline,
         },
-        Err(Ended::Said(why)) => why,
+        Ended::Said(why) => why,
     };
     if say(&channel, &wire::stop(why)).await.is_ok() {
         linger(job, link, &channel, LINGER_STOP).await;
@@ -174,18 +256,38 @@ async fn send(
     Err(format!("parou: {}", why.wire()))
 }
 
-/// Waits (at most `most`) for the other side to close, so what is still on
-/// its way gets there.
-async fn linger(job: &mut Job, link: &mut Link, channel: &Arc<dyn DataChannel>, most: Duration) {
+/// How a wait for the other side ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Heard {
+    /// They have it all (wire::got).
+    Got,
+    /// They stopped first (wire::bye).
+    Bye,
+    /// The channel or the connection closed, or the wait ran out.
+    Closed,
+}
+
+/// Waits (at most `most`) for the other side to say it has it all, or to
+/// close, so what is still on its way gets there.
+async fn linger(
+    job: &mut Job,
+    link: &mut Link,
+    channel: &Arc<dyn DataChannel>,
+    most: Duration,
+) -> Heard {
     let until = tokio::time::sleep(most);
     tokio::pin!(until);
     loop {
         tokio::select! {
-            ev = channel.poll() => {
-                if matches!(ev, Some(DataChannelEvent::OnClose) | None) {
-                    return;
-                }
-            }
+            ev = channel.poll() => match ev {
+                Some(DataChannelEvent::OnClose) | None => return Heard::Closed,
+                Some(DataChannelEvent::OnMessage(m)) if m.is_string => match said(&m.data) {
+                    Some(Said::Got) => return Heard::Got,
+                    Some(Said::Bye) => return Heard::Bye,
+                    _ => {}
+                },
+                Some(_) => {}
+            },
             ev = link.events.recv() => {
                 if matches!(
                     ev,
@@ -193,11 +295,11 @@ async fn linger(job: &mut Job, link: &mut Link, channel: &Arc<dyn DataChannel>, 
                         RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                     )) | None
                 ) {
-                    return;
+                    return Heard::Closed;
                 }
             }
-            () = &mut until => return,
-            _ = job.halt.changed() => return,
+            () = &mut until => return Heard::Closed,
+            _ = job.halt.changed() => return Heard::Closed,
         }
     }
 }
@@ -218,6 +320,7 @@ async fn transfer(
     link: &mut Link,
     channel: &Arc<dyn DataChannel>,
     list: Arc<Vec<Hash>>,
+    gauge: &Gauge,
 ) -> Result<(), Ended> {
     let (to, msg, id, sid) = (job.from, job.msg, job.id.clone(), job.sid.clone());
     let tell = |data: Value| d.tell(to, msg, &id, wire::signal(&sid, data));
@@ -273,11 +376,15 @@ async fn transfer(
                         Some(turn) => break turn,
                         None => return Err(fell("sem vez")),
                     },
-                    ev = channel.poll() => {
-                        if matches!(ev, Some(DataChannelEvent::OnClose) | None) {
+                    ev = channel.poll() => match ev {
+                        Some(DataChannelEvent::OnClose) | None => return Err(fell("desistiram")),
+                        Some(DataChannelEvent::OnMessage(m))
+                            if m.is_string && said(&m.data) == Some(Said::Bye) =>
+                        {
                             return Err(fell("desistiram"));
                         }
-                    }
+                        Some(_) => {}
+                    },
                     ev = link.events.recv() => match ev {
                         Some(LinkEv::Candidate(c)) => tell(link.candidate(c).await),
                         Some(LinkEv::State(
@@ -295,6 +402,8 @@ async fn transfer(
     };
     job.going.store(true, Ordering::Relaxed);
     d.changed();
+    // The transfer's own time starts with its turn.
+    gauge.flowing();
     if hashes {
         let bytes = hash::to_bytes(&list);
         for (i, c) in bytes.chunks(wire::CHUNK).enumerate() {
@@ -306,11 +415,40 @@ async fn transfer(
     let (tx, mut rx) = mpsc::channel::<Block>(AHEAD);
     let (path, size, piece) = (job.path.clone(), job.size, job.piece);
     let reader = tokio::task::spawn_blocking(move || read(&path, size, piece, from, &list, &tx));
+    // Through a relay (mine or theirs), no faster than it takes
+    // (RELAY_RATE).
+    let mut throttle = if link.through_relay().await {
+        crate::logln!(
+            "direto: para {} pelo relé, até {:.1} MB/s",
+            job.from,
+            RELAY_RATE / 1e6
+        );
+        Some(Throttle::new(RELAY_RATE))
+    } else {
+        None
+    };
+    // Since when nothing was handed to the connection: waiting on the disk
+    // (the reader). Handing it over waits on the connection when its
+    // buffer is full (or on the relay's limit).
+    let mut idle = std::time::Instant::now();
     let result = loop {
         tokio::select! {
             block = rx.recv() => match block {
                 Some(Block::Data(offset, bytes)) => {
-                    if let Err(e) = send_block(channel, &mut job.halt, &job.sent, offset, &bytes).await {
+                    gauge.waited_on_disk(idle.elapsed());
+                    let handing = std::time::Instant::now();
+                    let sent = send_block(
+                        channel,
+                        &mut job.halt,
+                        &job.sent,
+                        &mut throttle,
+                        offset,
+                        &bytes,
+                    )
+                    .await;
+                    gauge.waited_on_net(handing.elapsed());
+                    idle = std::time::Instant::now();
+                    if let Err(e) = sent {
                         break Err(e);
                     }
                 }
@@ -321,11 +459,16 @@ async fn transfer(
                 }
                 None => break Ok(()),
             },
-            ev = channel.poll() => {
-                if matches!(ev, Some(DataChannelEvent::OnClose) | None) {
-                    break Err(fell("fecharam"));
+            ev = channel.poll() => match ev {
+                Some(DataChannelEvent::OnClose) | None => break Err(fell("fecharam")),
+                // They stopped (wire::bye): nothing more goes.
+                Some(DataChannelEvent::OnMessage(m))
+                    if m.is_string && said(&m.data) == Some(Said::Bye) =>
+                {
+                    break Err(fell("pararam de baixar"));
                 }
-            }
+                Some(_) => {}
+            },
             ev = link.events.recv() => {
                 if matches!(
                     ev,
@@ -346,16 +489,26 @@ async fn transfer(
     say(channel, &wire::done()).await.map_err(Ended::Fell)
 }
 
-/// One block of the file, in chunks.
+/// One block of the file, in chunks (smaller ones, and no faster than the
+/// relay takes, when `throttle` holds it).
 async fn send_block(
     channel: &Arc<dyn DataChannel>,
     halt: &mut watch::Receiver<Halt>,
     sent: &AtomicU64,
+    throttle: &mut Option<Throttle>,
     offset: u64,
     bytes: &[u8],
 ) -> Result<(), Ended> {
-    for (k, c) in bytes.chunks(wire::CHUNK).enumerate() {
-        let at = offset + (k * wire::CHUNK) as u64;
+    let size = if throttle.is_some() {
+        RELAY_CHUNK
+    } else {
+        wire::CHUNK
+    };
+    for (k, c) in bytes.chunks(size).enumerate() {
+        let at = offset + (k * size) as u64;
+        if let Some(t) = throttle {
+            t.wait(c.len()).await;
+        }
         put(channel, halt, wire::chunk(wire::DATA, at, c)).await?;
         sent.fetch_add(c.len() as u64, Ordering::Relaxed);
     }

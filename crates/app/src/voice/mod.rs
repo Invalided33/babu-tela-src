@@ -17,6 +17,7 @@ pub mod dxgi;
 pub mod hw;
 pub mod interop;
 pub mod loopback;
+pub(crate) mod netem;
 pub mod plan;
 pub mod relay;
 pub mod rtc;

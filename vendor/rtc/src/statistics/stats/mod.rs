@@ -47,6 +47,7 @@ pub mod ice_candidate_pair;
 pub mod media;
 pub mod peer_connection;
 pub mod rtp_stream;
+pub mod sctp_transport;
 pub mod transport;
 
 /// The type of a statistics object.
@@ -103,6 +104,10 @@ pub enum RTCStatsType {
     /// Statistics for a certificate.
     #[serde(rename = "certificate")]
     Certificate,
+    /// Statistics for the SCTP association under the data channels (Babu
+    /// Tela; see [`sctp_transport`]).
+    #[serde(rename = "sctp-transport")]
+    SctpTransport,
 }
 
 /// The unique identifier for a statistics object.

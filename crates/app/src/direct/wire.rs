@@ -56,6 +56,20 @@ pub fn done() -> Value {
     json!({ "t": "done" })
 }
 
+/// The person downloading has it all, checked: the sender can close at
+/// once instead of waiting for the connection to close (an older app never
+/// says it, and its sender waits as before).
+pub fn got() -> Value {
+    json!({ "t": "ok" })
+}
+
+/// The person downloading stops here (paused, cancelled, quitting): the
+/// sender stops too. Through the relay a connection's closing may never
+/// reach the other side, which would otherwise send on into nothing.
+pub fn bye() -> Value {
+    json!({ "t": "bye" })
+}
+
 /// The sender is sending to others: this one waits its turn, connected.
 pub fn queued() -> Value {
     json!({ "t": "queued" })
@@ -72,6 +86,8 @@ pub enum Said {
     Get { from: u64, hashes: bool },
     Queued,
     Done,
+    Got,
+    Bye,
     Stop(Stop),
 }
 
@@ -83,6 +99,8 @@ pub fn read(v: &Value) -> Option<Said> {
         }),
         "queued" => Some(Said::Queued),
         "done" => Some(Said::Done),
+        "ok" => Some(Said::Got),
+        "bye" => Some(Said::Bye),
         "stop" => Some(Said::Stop(Stop::from_wire(v["why"].as_str()?))),
         _ => None,
     }
@@ -144,4 +162,30 @@ pub fn signal(sid: &str, mut data: Value) -> Value {
 /// The signalling saying why transfer `sid` cannot go on.
 pub fn refusal(sid: &str, why: Stop) -> Value {
     json!({ "sid": sid, "error": why.wire() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_messages_read_back() {
+        assert_eq!(
+            read(&get(3, false)),
+            Some(Said::Get {
+                from: 3,
+                hashes: false
+            })
+        );
+        assert_eq!(read(&queued()), Some(Said::Queued));
+        assert_eq!(read(&done()), Some(Said::Done));
+        assert_eq!(read(&got()), Some(Said::Got));
+        assert_eq!(read(&bye()), Some(Said::Bye));
+        assert_eq!(read(&stop(Stop::Busy)), Some(Said::Stop(Stop::Busy)));
+        // Something a newer app says: not understood, not an error.
+        assert_eq!(read(&json!({ "t": "novo" })), None);
+        let c = chunk(DATA, 7, b"abc");
+        assert_eq!(read_chunk(&c), Some((DATA, 7, &b"abc"[..])));
+        assert_eq!(read_chunk(&c[..HEADER]), None);
+    }
 }

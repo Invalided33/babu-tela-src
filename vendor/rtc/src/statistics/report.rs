@@ -17,6 +17,7 @@ use crate::statistics::stats::rtp_stream::received::inbound::RTCInboundRtpStream
 use crate::statistics::stats::rtp_stream::received::remote_inbound::RTCRemoteInboundRtpStreamStats;
 use crate::statistics::stats::rtp_stream::sent::outbound::RTCOutboundRtpStreamStats;
 use crate::statistics::stats::rtp_stream::sent::remote_outbound::RTCRemoteOutboundRtpStreamStats;
+use crate::statistics::stats::sctp_transport::RTCSctpTransportStats;
 use crate::statistics::stats::transport::RTCTransportStats;
 use std::collections::HashMap;
 
@@ -56,6 +57,8 @@ pub enum RTCStatsReportEntry {
     VideoSource(RTCVideoSourceStats),
     /// Audio playout statistics.
     AudioPlayout(RTCAudioPlayoutStats),
+    /// The SCTP association under the data channels (Babu Tela).
+    SctpTransport(RTCSctpTransportStats),
 }
 
 impl RTCStatsReportEntry {
@@ -77,6 +80,7 @@ impl RTCStatsReportEntry {
             RTCStatsReportEntry::AudioSource(_) => RTCStatsType::MediaSource,
             RTCStatsReportEntry::VideoSource(_) => RTCStatsType::MediaSource,
             RTCStatsReportEntry::AudioPlayout(_) => RTCStatsType::MediaPlayout,
+            RTCStatsReportEntry::SctpTransport(_) => RTCStatsType::SctpTransport,
         }
     }
 
@@ -106,6 +110,7 @@ impl RTCStatsReportEntry {
             RTCStatsReportEntry::AudioSource(s) => &s.media_source_stats.stats.id,
             RTCStatsReportEntry::VideoSource(s) => &s.media_source_stats.stats.id,
             RTCStatsReportEntry::AudioPlayout(s) => &s.stats.id,
+            RTCStatsReportEntry::SctpTransport(s) => &s.stats.id,
         }
     }
 }
@@ -211,6 +216,23 @@ impl RTCStatsReport {
     pub fn peer_connection(&self) -> Option<&RTCPeerConnectionStats> {
         self.get("RTCPeerConnection").and_then(|e| match e {
             RTCStatsReportEntry::PeerConnection(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// Adds an entry (Babu Tela: the SCTP association's, which the
+    /// accumulator does not keep).
+    pub(crate) fn push(&mut self, entry: RTCStatsReportEntry) {
+        let id = entry.id().to_string();
+        if self.entries.insert(id.clone(), entry).is_none() {
+            self.order.push(id);
+        }
+    }
+
+    /// Returns the SCTP association's stats if present (Babu Tela).
+    pub fn sctp_transport(&self) -> Option<&RTCSctpTransportStats> {
+        self.entries.values().find_map(|e| match e {
+            RTCStatsReportEntry::SctpTransport(s) => Some(s),
             _ => None,
         })
     }

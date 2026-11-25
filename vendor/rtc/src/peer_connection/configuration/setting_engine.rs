@@ -120,6 +120,9 @@ use crate::peer_connection::transport::ice::candidate_type::RTCIceCandidateType;
 use ice::mdns::MulticastDnsMode;
 use std::time::Duration;
 
+/// SCTP's congestion control, for `with_sctp_congestion_control` (Babu Tela).
+pub use ::sctp::CongestionControl as SctpCongestionControl;
+
 /// Equal to UDP MTU
 pub(crate) const RECEIVE_MTU: usize = 1460;
 
@@ -374,6 +377,9 @@ pub struct SettingEngine {
     /// budget via rtc-sctp's `max_payload_size_for_mtu`. `None` uses the rtc-sctp
     /// default (`INITIAL_MTU`, 1191 — the TURN-relayed IPv6 minimum-MTU budget).
     pub(crate) sctp_mtu: Option<u32>,
+    /// How SCTP's sending side reacts to the path (Babu Tela; Reno unless
+    /// `with_sctp_congestion_control` says otherwise).
+    pub(crate) sctp_congestion_control: ::sctp::CongestionControl,
     pub(crate) ignore_rid_pause_for_recv: bool,
     pub(crate) write_ssrc_attributes_for_simulcast: bool,
     /// The secret mixed into the DTLS handshake, asked for as the handshake
@@ -1427,6 +1433,15 @@ impl SettingEngineBuilder {
     /// default, leave this unset.
     pub fn with_sctp_mtu(mut self, mtu: u32) -> Self {
         self.0.sctp_mtu = Some(mtu);
+        self
+    }
+
+    /// How SCTP's sending side reacts to the path (Babu Tela): Reno by
+    /// default (RFC 9260 §7.2), or BBR, paced, with RACK's loss detection
+    /// (vendor/rtc-sctp, association/bbr.rs), for bulk data over paths that
+    /// lose packets at random.
+    pub fn with_sctp_congestion_control(mut self, cc: ::sctp::CongestionControl) -> Self {
+        self.0.sctp_congestion_control = cc;
         self
     }
 
