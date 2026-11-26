@@ -30,8 +30,18 @@ use super::{Direct, Halt};
 use crate::voice::relay::Relay;
 
 /// Once everything is out, how long the other side has to say it has it
-/// (by closing): what is still on its way must not be cut off.
+/// (by closing): what is still on its way must not be cut off. The clock
+/// starts once the connection holds nothing of mine unacknowledged; until
+/// then the wait lasts as long as that keeps going down (`linger`). Handed
+/// over is not delivered: up to SEND_BUFFER (8 MiB, direct/link.rs) can
+/// still wait in the connection, which a 1 Mbit/s upload takes 67 s to
+/// send. Measured from the last block handed over, 30 s closed a 12 MiB
+/// send at 1 Mbit/s with 4.7 MiB still queued, and the attempt after it,
+/// 8 MiB to go, could not get one whole 4 MiB piece there in 30 s either.
 const LINGER: Duration = Duration::from_secs(30);
+
+/// How often the final wait looks at what is still unacknowledged.
+const PROGRESS_EVERY: Duration = Duration::from_secs(1);
 
 /// After saying why it stops, how long the other side has to hear it.
 const LINGER_STOP: Duration = Duration::from_secs(5);
@@ -225,15 +235,17 @@ async fn send(
     let ended = match ended {
         Ok(()) => {
             // Measured until it is all there, not only handed over.
-            let heard = linger(job, link, &channel, LINGER).await;
+            let heard = linger(job, link, &channel, LINGER, true).await;
             meter.finish(what).await;
-            // They stopped before it all got there (paused, say): not a
-            // whole send. A close counts as one, as an older app closes
-            // once it has it all, saying nothing.
-            if heard == Heard::Bye {
-                return Err("pararam de baixar antes do fim".into());
+            // They stopped before it all got there (paused, say), or the
+            // rest stopped getting there: not a whole send. A close counts
+            // as one, as an older app closes once it has it all, saying
+            // nothing.
+            match heard {
+                Heard::Bye => return Err("pararam de baixar antes do fim".into()),
+                Heard::Stalled => return Err("o fim não chegou em 60 s".into()),
+                Heard::Got | Heard::Closed => return Ok(()),
             }
-            return Ok(());
         }
         Err(e) => {
             meter.finish(what).await;
@@ -251,7 +263,7 @@ async fn send(
         Ended::Said(why) => why,
     };
     if say(&channel, &wire::stop(why)).await.is_ok() {
-        linger(job, link, &channel, LINGER_STOP).await;
+        linger(job, link, &channel, LINGER_STOP, false).await;
     }
     Err(format!("parou: {}", why.wire()))
 }
@@ -265,20 +277,39 @@ enum Heard {
     Bye,
     /// The channel or the connection closed, or the wait ran out.
     Closed,
+    /// What was still on its way stopped getting there (nothing of it
+    /// acknowledged for STALL): the rest never arrived.
+    Stalled,
 }
 
-/// Waits (at most `most`) for the other side to say it has it all, or to
-/// close, so what is still on its way gets there.
+/// Waits for the other side to say it has it all, or to close, so what is
+/// still on its way gets there: at most `most`, or, `delivering` (the whole
+/// file was handed over), `most` from when nothing of mine is left
+/// unacknowledged, and until then for as long as that keeps going down
+/// (STALL without it is a connection gone).
 async fn linger(
     job: &mut Job,
     link: &mut Link,
     channel: &Arc<dyn DataChannel>,
     most: Duration,
+    delivering: bool,
 ) -> Heard {
-    let until = tokio::time::sleep(most);
+    let left = || async { channel.outstanding_bytes().await.unwrap_or(0) };
+    let mut before = if delivering { left().await } else { 0 };
+    let wait = |bytes: usize| if bytes == 0 { most } else { STALL };
+    let until = tokio::time::sleep(wait(before));
     tokio::pin!(until);
+    let mut look = tokio::time::interval(PROGRESS_EVERY);
+    look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
+            _ = look.tick(), if delivering && before > 0 => {
+                let now = left().await;
+                if now < before {
+                    until.as_mut().reset(tokio::time::Instant::now() + wait(now));
+                }
+                before = now;
+            }
             ev = channel.poll() => match ev {
                 Some(DataChannelEvent::OnClose) | None => return Heard::Closed,
                 Some(DataChannelEvent::OnMessage(m)) if m.is_string => match said(&m.data) {
@@ -298,7 +329,9 @@ async fn linger(
                     return Heard::Closed;
                 }
             }
-            () = &mut until => return Heard::Closed,
+            () = &mut until => {
+                return if before > 0 { Heard::Stalled } else { Heard::Closed };
+            }
             _ = job.halt.changed() => return Heard::Closed,
         }
     }

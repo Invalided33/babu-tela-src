@@ -812,14 +812,11 @@ impl Direct {
         let mut again = None;
         match (halt, end) {
             (Halt::Cancel, _) => {}
-            // Resumed while this attempt was still ending (it tells the
-            // sender it stops, which takes a moment): the next goes now.
-            (Halt::Pause, _) if d.state == State::Active => {
-                live.phase = Phase::Idle;
-                again = Some(Duration::ZERO);
-            }
-            (Halt::Pause | Halt::Leave, _) => live.phase = Phase::Idle,
-            (Halt::Go, fetch::End::Done) => {
+            // Whole, even when "Pausar" (or quitting) came as it ended: the
+            // file is already in its place under its name. Taken for a
+            // pause, it stayed paused, and "Continuar" asked again for a
+            // file that was all here.
+            (_, fetch::End::Done) => {
                 d.state = State::Done;
                 d.verified = hash::pieces(d.size, d.piece);
                 live.phase = Phase::Idle;
@@ -828,6 +825,13 @@ impl Direct {
                     cid: d.cid,
                 });
             }
+            // Resumed while this attempt was still ending (it tells the
+            // sender it stops, which takes a moment): the next goes now.
+            (Halt::Pause, _) if d.state == State::Active => {
+                live.phase = Phase::Idle;
+                again = Some(Duration::ZERO);
+            }
+            (Halt::Pause | Halt::Leave, _) => live.phase = Phase::Idle,
             (Halt::Go, fetch::End::Refused(Stop::Offline)) => {
                 live.phase = Phase::Waiting(Wait::Offline);
             }
