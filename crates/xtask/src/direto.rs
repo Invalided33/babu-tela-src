@@ -706,12 +706,13 @@ fn timeline(seconds: &Value) {
     };
     let every = list.len().div_ceil(30).max(1);
     println!(
-        "    {:>6} {:>7} {:>9} {:>7} {:>8} {:>8} {:>6} {:>6} {:>6} {:>6} {:>4} {:>5}",
+        "    {:>6} {:>7} {:>9} {:>7} {:>8} {:>8} {:>8} {:>6} {:>6} {:>6} {:>6} {:>4} {:>5}",
         "t (s)",
         "MB/s",
         "controle",
         "banda",
         "janela",
+        "limite",
         "no ar",
         "srtt",
         "rttmin",
@@ -732,8 +733,14 @@ fn timeline(seconds: &Value) {
             }
         };
         let kb = |k: &str| format!("{:.0}K", mean(k));
+        // BBR's bound after a probe lost too much, as the last second had
+        // it ("-": none).
+        let bound = last["limite_kb"]
+            .as_f64()
+            .filter(|b| *b > 0.0)
+            .map_or_else(|| "-".to_owned(), |b| format!("{b:.0}K"));
         println!(
-            "    {:>6} {:>7.2} {:>9} {:>7.2} {:>8} {:>8} {:>6.0} {:>6.1} {:>6} {:>6} {:>4} {:>4.0}%",
+            "    {:>6} {:>7.2} {:>9} {:>7.2} {:>8} {:>8} {:>8} {:>6.0} {:>6.1} {:>6} {:>6} {:>4} {:>4.0}%",
             last["t"]
                 .as_f64()
                 .map_or_else(|| "?".into(), |t| format!("{t:.0}")),
@@ -741,6 +748,7 @@ fn timeline(seconds: &Value) {
             last["controle"].as_str().unwrap_or("?"),
             mean("banda_mbs"),
             kb("janela_kb"),
+            bound,
             kb("no_ar_kb"),
             mean("srtt_ms"),
             mean("rtt_min_ms"),

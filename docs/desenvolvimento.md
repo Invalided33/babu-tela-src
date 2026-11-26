@@ -54,7 +54,7 @@ cargo xtask direto --mb 300 --sem-pausa --rede atraso=20 --rede-ana atraso=20,ba
 cargo xtask direto --mb 300 --sem-pausa --so-rele
 ```
 
-Cada app mede seu lado da conexão a cada segundo. O teste imprime os totais dos dois lados e uma tabela do envio, com a velocidade, o estado do controle de congestionamento, a banda que ele mediu, a janela, os bytes em trânsito, o tempo de ida e volta, as perdas, os reenvios, os timeouts e o tempo que o envio esperou pela rede. O app instalado grava os totais de cada transferência, uma linha JSON por envio ou download, em `%LOCALAPPDATA%\Prosa\direto\medidas.log`. Com `BABUTELA_DIRETO_LOG=1`, cada segundo também vai para o log do processo. [Medidor](../crates/app/src/direct/meter.rs) · [Linha de teste](../crates/app/src/voice/netem.rs) · [Controle de congestionamento](../vendor/rtc-sctp/src/association/bbr.rs)
+Cada app mede seu lado da conexão a cada segundo. O teste imprime os totais dos dois lados e uma tabela do envio, com a velocidade, o estado do controle de congestionamento, a banda que ele mediu, a janela, o limite que o BBR guardou depois de uma sondagem com perda, os bytes em trânsito, o tempo de ida e volta, as perdas, os reenvios, os timeouts e o tempo que o envio esperou pela rede. O app instalado grava os totais de cada transferência, uma linha JSON por envio ou download, em `%LOCALAPPDATA%\Prosa\direto\medidas.log`. Com `BABUTELA_DIRETO_LOG=1`, cada segundo também vai para o log do processo. [Medidor](../crates/app/src/direct/meter.rs) · [Linha de teste](../crates/app/src/voice/netem.rs) · [Controle de congestionamento](../vendor/rtc-sctp/src/association/bbr.rs)
 
 ### Comparar controles de congestionamento
 

@@ -305,6 +305,8 @@ impl Seconds {
                     ("rto_ms", json!((s.retransmission_timeout * 1000.0).round())),
                     ("banda_mbs", json!(round(s.delivery_rate / 1e6, 2))),
                     ("ritmo_mbs", json!(round(s.pacing_rate / 1e6, 2))),
+                    // BBR's bound after a probe lost too much (0: none).
+                    ("limite_kb", json!((s.inflight_bound / 1024.0).round())),
                     (
                         "rtt_min_ms",
                         json!(round(s.min_round_trip_time * 1000.0, 1)),

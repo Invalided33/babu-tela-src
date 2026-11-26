@@ -1,5 +1,5 @@
 use crate::association::{
-    bbr::{Bbr, Pacer, Sample},
+    bbr::{Bbr, Lost, Pacer, Sample},
     cubic::Cubic,
     state::{AckMode, AckState, AssociationState},
     stats::{AssociationStats, Congestion},
@@ -141,6 +141,8 @@ struct Acked {
     first_sent_time: Option<Instant>,
     app_limited: bool,
     nsent: u32,
+    tx_in_flight: u64,
+    lost: u64,
 }
 
 impl Acked {
@@ -157,6 +159,8 @@ impl Acked {
                 first_sent_time: c.first_sent_time,
                 app_limited: c.app_limited,
                 nsent: c.nsent,
+                tx_in_flight: c.tx_in_flight,
+                lost: c.lost,
             });
         }
     }
@@ -220,6 +224,11 @@ pub struct Association {
     /// bytes newly delivered (`bbr_on_sack` takes them).
     sack_newest: Option<Acked>,
     sack_delivered: u64,
+    /// The bytes RACK found lost so far, and whether the window held
+    /// sending back since the last SACK (BBR's measures of too much in
+    /// flight, and of using all the window it has).
+    lost_bytes: u64,
+    cwnd_limited: bool,
 
     pub(crate) peer_verification_tag: u32,
     my_verification_tag: u32,
@@ -341,6 +350,8 @@ impl Default for Association {
             rack_time: None,
             sack_newest: None,
             sack_delivered: 0,
+            lost_bytes: 0,
+            cwnd_limited: false,
 
             peer_verification_tag: 0,
             my_verification_tag: 0,
@@ -770,6 +781,7 @@ impl Association {
                     b.btl_bw(),
                     b.min_rtt().map_or(0.0, |r| r.as_secs_f64() * 1000.0),
                     b.pacing_rate(),
+                    b.inflight_longterm().unwrap_or(0.0),
                 )
             }),
             bytes_sent: self.bytes_sent,
@@ -2831,6 +2843,9 @@ impl Association {
                 self.delivered_time.or(Some(now)),
                 self.first_sent_time.or(Some(now)),
                 self.app_limited_until > 0,
+                // Already counted in flight.
+                self.inflight_queue.get_num_bytes() as u64,
+                self.lost_bytes,
             )
         });
         for chunk in &mut chunks {
@@ -2839,12 +2854,16 @@ impl Association {
                 c.nsent += 1;
                 chunk.nsent = c.nsent;
                 // Under BBR it counts from this sending (rate and RACK).
-                if let Some((delivered, delivered_time, first_sent_time, app_limited)) = stamp {
+                if let Some((delivered, delivered_time, first_sent_time, app_limited, tx, lost)) =
+                    stamp
+                {
                     c.since = Some(now);
                     c.delivered = delivered;
                     c.delivered_time = delivered_time;
                     c.first_sent_time = first_sent_time;
                     c.app_limited = app_limited;
+                    c.tx_in_flight = tx;
+                    c.lost = lost;
                 }
                 self.stats.inc_t3_retrans();
                 trace!(
@@ -3158,6 +3177,7 @@ impl Association {
 
                 if self.inflight_queue.get_num_bytes() + data_len > self.cwnd as usize {
                     blocked = true;
+                    self.cwnd_limited = true;
                     break; // would exceeds cwnd
                 }
 
@@ -3316,6 +3336,9 @@ impl Association {
         c.delivered_time = self.delivered_time.or(Some(now));
         c.first_sent_time = self.first_sent_time.or(Some(now));
         c.app_limited = self.app_limited_until > 0;
+        // Not in the in-flight queue yet.
+        c.tx_in_flight = (self.inflight_queue.get_num_bytes() + c.user_data.len()) as u64;
+        c.lost = self.lost_bytes;
     }
 
     /// After a SACK, under BBR: the delivery count, the rate sample from the
@@ -3362,7 +3385,7 @@ impl Association {
                 self.rack_time = Some(self.rack_time.map_or(p.since, |t| t.max(p.since)));
             }
         }
-        let lost = self.rack_mark_lost(min_rtt);
+        let lost = self.rack_mark_lost(now, min_rtt);
         if newly == 0 && lost == 0 {
             return;
         }
@@ -3372,8 +3395,12 @@ impl Association {
             lost,
             prior_delivered: newest.map(|p| p.delivered),
             rate,
+            sample_delivered: newest.map_or(0, |p| self.delivered.saturating_sub(p.delivered)),
+            tx_in_flight: newest.map(|p| p.tx_in_flight),
+            lost_since: newest.map_or(0, |p| self.lost_bytes.saturating_sub(p.lost)),
             rtt,
             inflight: self.inflight_queue.get_num_bytes() as u64,
+            cwnd_limited: std::mem::take(&mut self.cwnd_limited),
         };
         if let Some(bbr) = &mut self.bbr {
             bbr.on_sack(now, &sample);
@@ -3382,8 +3409,9 @@ impl Association {
     }
 
     /// RACK: marks for retransmission the chunks sent a reordering window
-    /// before the newest one the peer acknowledged; the bytes marked.
-    fn rack_mark_lost(&mut self, min_rtt: Option<Duration>) -> u64 {
+    /// before the newest one the peer acknowledged, each told to BBR; the
+    /// bytes marked.
+    fn rack_mark_lost(&mut self, now: Instant, min_rtt: Option<Duration>) -> u64 {
         let Some(rack_time) = self.rack_time else {
             return 0;
         };
@@ -3403,8 +3431,21 @@ impl Association {
             };
             if since + reo_wnd <= rack_time {
                 c.retransmit = true;
-                lost += c.user_data.len() as u64;
+                let size = c.user_data.len() as u64;
+                lost += size;
                 chunks += 1;
+                self.lost_bytes += size;
+                if let Some(bbr) = &mut self.bbr {
+                    bbr.on_lost(
+                        now,
+                        Lost {
+                            size,
+                            tx_in_flight: c.tx_in_flight,
+                            lost_since: self.lost_bytes.saturating_sub(c.lost),
+                            app_limited: c.app_limited,
+                        },
+                    );
+                }
             } else if c.nsent == 1 {
                 // First sendings go out in TSN order: the rest are newer.
                 break;

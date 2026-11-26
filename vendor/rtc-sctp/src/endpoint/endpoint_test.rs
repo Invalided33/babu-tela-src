@@ -206,6 +206,42 @@ struct Pair {
     /// on the way (and how many went so far).
     lose_client_every: Option<u32>,
     client_sent: u32,
+    /// Babu Tela: the client's upload, bytes a second, and how long its
+    /// queue may get before what comes is dropped (None: no limit); when
+    /// the upload is free next, and the datagrams it dropped.
+    client_rate: Option<f64>,
+    client_queue: Duration,
+    client_free_at: Instant,
+    client_dropped: u32,
+    /// Babu Tela: a call's voice on the same upload, a datagram of `.1`
+    /// bytes every `.0` that never slows down (None: none); when the next
+    /// goes, and how many went and how many the queue dropped.
+    client_voice: Option<(Duration, usize)>,
+    voice_next: Instant,
+    voice_sent: u32,
+    voice_dropped: u32,
+}
+
+/// Babu Tela: a datagram of `len` bytes reaching an upload of `rate` bytes
+/// a second at `at`, the upload free at `free_at`: when it leaves (`at`
+/// without a limit), or None when the queue in front already holds more
+/// than `queue` and it is dropped.
+fn admit(
+    free_at: &mut Instant,
+    rate: Option<f64>,
+    queue: Duration,
+    at: Instant,
+    len: usize,
+) -> Option<Instant> {
+    let Some(rate) = rate else {
+        return Some(at);
+    };
+    let start = (*free_at).max(at);
+    if start - at > queue {
+        return None;
+    }
+    *free_at = start + Duration::from_secs_f64(len as f64 / rate);
+    Some(*free_at)
 }
 
 impl Pair {
@@ -244,6 +280,14 @@ impl Pair {
             latency: Duration::new(0, 0),
             lose_client_every: None,
             client_sent: 0,
+            client_rate: None,
+            client_queue: Duration::ZERO,
+            client_free_at: Instant::now(),
+            client_dropped: 0,
+            client_voice: None,
+            voice_next: Instant::now(),
+            voice_sent: 0,
+            voice_dropped: 0,
         }
     }
 
@@ -257,22 +301,16 @@ impl Pair {
 
         let client_t = self.client.next_wakeup();
         let server_t = self.server.next_wakeup();
-        match min_opt(client_t, server_t) {
-            Some(t) if Some(t) == client_t => {
+        // Babu Tela: the voice's next datagram, when there is a voice.
+        let voice_t = self.client_voice.map(|_| self.voice_next);
+        match min_opt(min_opt(client_t, server_t), voice_t) {
+            Some(t) => {
                 if t != self.time {
                     self.time = self.time.max(t);
-                    trace!("advancing to {:?} for client", self.time);
+                    trace!("advancing to {:?}", self.time);
                 }
                 true
             }
-            Some(t) if Some(t) == server_t => {
-                if t != self.time {
-                    self.time = self.time.max(t);
-                    trace!("advancing to {:?} for server", self.time);
-                }
-                true
-            }
-            Some(_) => unreachable!(),
             None => false,
         }
     }
@@ -283,6 +321,18 @@ impl Pair {
     }
 
     pub fn drive_client(&mut self) {
+        // Babu Tela: the voice due by now goes first, at its own times.
+        if let Some((every, len)) = self.client_voice {
+            while self.voice_next <= self.time {
+                let at = self.voice_next;
+                self.voice_next += every;
+                self.voice_sent += 1;
+                let (rate, queue) = (self.client_rate, self.client_queue);
+                if admit(&mut self.client_free_at, rate, queue, at, len).is_none() {
+                    self.voice_dropped += 1;
+                }
+            }
+        }
         self.client.drive(self.time, self.server.addr);
         for x in self.client.outbound.drain(..) {
             if let Payload::RawEncode(contents) = x.message {
@@ -298,8 +348,21 @@ impl Pair {
                         continue;
                     }
                     if self.server.addr == x.transport.peer_addr {
+                        // Through the upload and its queue, when it has a
+                        // limit: what does not fit is dropped.
+                        let (rate, queue) = (self.client_rate, self.client_queue);
+                        let Some(leaves) = admit(
+                            &mut self.client_free_at,
+                            rate,
+                            queue,
+                            self.time,
+                            content.len(),
+                        ) else {
+                            self.client_dropped += 1;
+                            continue;
+                        };
                         self.server.inbound.push_back((
-                            self.time + self.latency,
+                            leaves + self.latency,
                             x.transport.ecn,
                             content,
                         ));
@@ -3860,6 +3923,132 @@ fn test_assoc_bbr_delivers_through_random_loss() -> Result<()> {
     assert!(
         bbr * 3 < reno,
         "BBR took {bbr:?}, Reno {reno:?}: not much faster"
+    );
+    Ok(())
+}
+
+/// Babu Tela: a call's voice and a file on one upload of 2 Mbit/s, with a
+/// 40 ms round trip and a 20 ms queue (5 KB) in front of the upload, as a
+/// home router has it: 100 bytes of voice every 10 ms, which never slow
+/// down, beside 2 MiB of the file. BBR (v3) holds what it keeps in flight
+/// to what got through when a probe lost too much, slows down after lossy
+/// rounds, and leaves room in the queue: the voice keeps its packets. (BBR
+/// v1, with twice the path's capacity in flight whatever was lost, took
+/// 10.8 % of a call's voice through such a line, measured live with
+/// `cargo xtask direto --em-chamada`; Reno and CUBIC 2.9 %.)
+#[test]
+fn test_assoc_bbr_spares_the_voice_on_a_shallow_queue() -> Result<()> {
+    use crate::config::CongestionControl;
+
+    const RATE: f64 = 250e3;
+    const VOICE: (Duration, usize) = (Duration::from_millis(10), 100);
+
+    /// The time the file took, and the share of the file's datagrams and
+    /// of the voice's the queue dropped once past the first 1.5 s.
+    fn transfer(cc: CongestionControl) -> Result<(Duration, f64, f64, crate::Congestion)> {
+        let si: u16 = 1;
+        let transport = || {
+            TransportConfig::default()
+                .with_max_receive_buffer_size(8 << 20)
+                .with_congestion_control(cc)
+        };
+        let mut pair = Pair::new(EndpointConfig::default(), ServerConfig::new(transport()));
+        pair.latency = Duration::from_millis(20);
+        pair.client_rate = Some(RATE);
+        pair.client_queue = Duration::from_millis(20);
+        // The virtual line only (the real sockets wait 10 ms a read).
+        pair.client.socket = None;
+        pair.server.socket = None;
+        let (client_ch, server_ch) = pair.connect_with(ClientConfig::new(transport()));
+        establish_session_pair(&mut pair, client_ch, server_ch, si)?;
+        pair.client_voice = Some(VOICE);
+        pair.voice_next = pair.time;
+
+        let msg = Bytes::from(vec![5u8; 64 * 1024]);
+        let n_msgs = 32;
+        let start = pair.time;
+        for _ in 0..n_msgs {
+            let now = pair.time;
+            pair.client_stream(client_ch, si)?.write_sctp(
+                now,
+                &msg,
+                PayloadProtocolIdentifier::Binary,
+            )?;
+        }
+        let mut got = 0;
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut steps = 0u64;
+        // Counted once past the start (Startup overfills any queue).
+        let mut from: Option<(u32, u32, u32, u32)> = None;
+        while got < n_msgs {
+            pair.step();
+            if from.is_none() && pair.time - start > Duration::from_millis(1500) {
+                from = Some((
+                    pair.client_sent,
+                    pair.client_dropped,
+                    pair.voice_sent,
+                    pair.voice_dropped,
+                ));
+            }
+            while let Some(chunks) = pair.server_stream(server_ch, si)?.read_sctp()? {
+                assert_eq!(chunks.read(&mut buf)?, msg.len());
+                assert!(buf.iter().all(|b| *b == 5));
+                got += 1;
+            }
+            steps += 1;
+            assert!(steps < 20_000_000, "stalled with {got} of {n_msgs}");
+        }
+        let took = pair.time - start;
+        let (sent0, dropped0, voice0, voice_dropped0) = from.expect("over 1.5 s");
+        let share = |dropped: u32, sent: u32| f64::from(dropped) / f64::from(sent.max(1));
+        Ok((
+            took,
+            share(pair.client_dropped - dropped0, pair.client_sent - sent0),
+            share(
+                pair.voice_dropped - voice_dropped0,
+                pair.voice_sent - voice0,
+            ),
+            pair.client_conn_mut(client_ch).congestion(),
+        ))
+    }
+
+    let (reno, reno_file, reno_voice, _) = transfer(CongestionControl::Reno)?;
+    let (cubic, cubic_file, cubic_voice, _) = transfer(CongestionControl::Cubic)?;
+    let (bbr, bbr_file, bbr_voice, bbr_c) = transfer(CongestionControl::Bbr)?;
+    let pct = |x: f64| 100.0 * x;
+    eprintln!(
+        "2 MiB and a voice, 2 Mbit/s, 40 ms, 20 ms queue (dropped: file, voice): \
+         Reno {reno:?} ({:.2} %, {:.2} %), CUBIC {cubic:?} ({:.2} %, {:.2} %), \
+         BBR {bbr:?} ({:.2} %, {:.2} %)",
+        pct(reno_file),
+        pct(reno_voice),
+        pct(cubic_file),
+        pct(cubic_voice),
+        pct(bbr_file),
+        pct(bbr_voice),
+    );
+    // BBR v1 here: 9.1 s, 1.47 % of the file's datagrams and 3.29 % of the
+    // voice's dropped; this BBR, 9.2 s, 0.46 % and 1.44 % (Reno 4.08 % of
+    // the voice, CUBIC 8.96 %).
+    let ideal = Duration::from_secs_f64(2.0 * 1048576.0 / RATE);
+    assert!(
+        bbr < ideal * 13 / 10,
+        "BBR took {bbr:?}, the line {ideal:?}"
+    );
+    assert!(
+        bbr_file < 0.01,
+        "BBR lost {:.2} % of the file",
+        pct(bbr_file)
+    );
+    assert!(
+        bbr_voice < 0.02,
+        "BBR took {:.2} % of the voice",
+        pct(bbr_voice)
+    );
+    assert!(bbr_voice < reno_voice && bbr_voice < cubic_voice);
+    assert!(
+        bbr_c.bbr.is_some_and(|b| b.4 > 0.0),
+        "the probes' losses set a bound"
     );
     Ok(())
 }

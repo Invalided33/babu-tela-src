@@ -63,7 +63,7 @@ pub struct RTCSctpTransportStats {
     /// DATA chunks RACK found lost (under BBR).
     pub lost_data_chunks: u64,
     /// The congestion control: "reno", "cubic", or BBR's state ("startup",
-    /// "drain", "probe-bw", "probe-rtt").
+    /// "drain", ProbeBW's "down", "cruise", "refill" and "up", "probe-rtt").
     pub congestion_control: String,
     /// Under BBR: the bandwidth it measured and the rate it paces at,
     /// bytes a second, and the lowest round trip, seconds.
@@ -72,6 +72,9 @@ pub struct RTCSctpTransportStats {
     pub pacing_rate: f64,
     /// See `delivery_rate`.
     pub min_round_trip_time: f64,
+    /// Under BBR: the most it keeps in flight since a probe lost too much,
+    /// bytes (0: no such bound).
+    pub inflight_bound: f64,
 }
 
 impl RTCSctpTransportStats {
@@ -111,6 +114,7 @@ impl RTCSctpTransportStats {
             delivery_rate: c.bbr.map_or(0.0, |b| b.1),
             pacing_rate: c.bbr.map_or(0.0, |b| b.3),
             min_round_trip_time: c.bbr.map_or(0.0, |b| b.2 / 1000.0),
+            inflight_bound: c.bbr.map_or(0.0, |b| b.4),
         }
     }
 }

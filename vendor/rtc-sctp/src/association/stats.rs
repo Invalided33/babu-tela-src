@@ -149,10 +149,12 @@ pub struct Congestion {
     pub in_fast_recovery: bool,
     /// The window follows CUBIC (RFC 9438) instead of Reno.
     pub cubic: bool,
-    /// Under BBR: its state ("startup", "drain", "probe-bw", "probe-rtt"),
-    /// the path's bandwidth it measured (bytes a second), its lowest round
-    /// trip (milliseconds) and the pacing rate (bytes a second).
-    pub bbr: Option<(&'static str, f64, f64, f64)>,
+    /// Under BBR: its state ("startup", "drain", ProbeBW's "down",
+    /// "cruise", "refill" and "up", "probe-rtt"), the path's bandwidth it
+    /// measured (bytes a second), its lowest round trip (milliseconds), the
+    /// pacing rate (bytes a second), and the most it keeps in flight since
+    /// a probe lost too much (bytes; 0 while there is no such bound).
+    pub bbr: Option<(&'static str, f64, f64, f64, f64)>,
     /// Payload bytes sent and received so far.
     pub bytes_sent: usize,
     /// See `bytes_sent`.

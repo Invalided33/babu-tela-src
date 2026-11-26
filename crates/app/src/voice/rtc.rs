@@ -1734,9 +1734,13 @@ async fn new_pc(
     // with SCTP's small windows that keeps it out of the 1 s timeouts: ten
     // slides of photos came in 24 s instead of Reno's 44 s over a 40 ms
     // line losing 1 %, with the voice as with Reno everywhere (`cargo xtask
-    // direto --slides`). Not BBR: it keeps twice the path's capacity in
-    // flight whatever is lost, and on a 2 Mbit/s upload with a 20 ms queue
-    // it took 18 % of the voice with it, against 1.3 to 1.9 %.
+    // direto --slides`). BBR (v3, vendor/rtc-sctp's bbr.rs) did about as
+    // well here (23 s, and four slides over a 2 Mbit/s upload with a 20 ms
+    // queue in 30 s against CUBIC's 32, 1.3 % of the voice lost against
+    // 1.9 %), but it paces, which wants millisecond timers for as long as
+    // the call lasts: not worth two seconds. (BBR v1, which kept twice the
+    // path's capacity in flight whatever was lost, took 18 % of the voice
+    // on that upload.)
     let cc = sctp_congestion_control(SctpCongestionControl::Cubic);
     if cc == SctpCongestionControl::Bbr {
         // BBR paces (vendor/rtc-sctp, bbr.rs), which wants millisecond

@@ -184,6 +184,10 @@ pub struct ChunkPayloadData {
     pub(crate) first_sent_time: Option<Instant>,
     /// Sent while the sender was short of data.
     pub(crate) app_limited: bool,
+    /// Bytes in flight as it went out (itself included), and the bytes
+    /// found lost so far then: BBR's measure of too much in flight.
+    pub(crate) tx_in_flight: u64,
+    pub(crate) lost: u64,
 }
 
 impl Default for ChunkPayloadData {
@@ -212,6 +216,8 @@ impl Default for ChunkPayloadData {
             delivered_time: None,
             first_sent_time: None,
             app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
         }
     }
 }
