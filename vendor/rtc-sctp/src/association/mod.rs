@@ -1,5 +1,6 @@
 use crate::association::{
     bbr::{Bbr, Pacer, Sample},
+    cubic::Cubic,
     state::{AckMode, AckState, AssociationState},
     stats::{AssociationStats, Congestion},
 };
@@ -61,6 +62,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 pub(crate) mod bbr;
+pub(crate) mod cubic;
 pub(crate) mod state;
 pub(crate) mod stats;
 pub(crate) mod stream;
@@ -201,6 +203,9 @@ pub struct Association {
     // it, with its pacer, the delivery count its rate samples come from,
     // and RACK's clock (the latest send time the peer acknowledged).
     bbr: Option<Bbr>,
+    /// CUBIC (cubic.rs) in place of Reno's growth and cuts, when the
+    /// transport asks for it; Reno's slow start and fast recovery stay.
+    cubic: Option<Cubic>,
     pacer: Pacer,
     /// When the pacer lets the next chunk go, while it holds one back.
     pace_at: Option<Instant>,
@@ -326,6 +331,7 @@ impl Default for Association {
             bytes_sent: 0,
 
             bbr: None,
+            cubic: None,
             pacer: Pacer::default(),
             pace_at: None,
             delivered: 0,
@@ -458,6 +464,7 @@ impl Association {
 
         let bbr = (config.congestion_control() == CongestionControl::Bbr)
             .then(|| Bbr::new(now, mtu, cwnd));
+        let cubic = (config.congestion_control() == CongestionControl::Cubic).then(Cubic::default);
         // Under BBR the retransmission timeout backs off to BBR_RTO_MAX at
         // most: after an outage (a relay that went dark for a while) the
         // path is probed again within seconds, before ICE gives up on it.
@@ -470,6 +477,7 @@ impl Association {
             side,
             handshake_completed: false,
             bbr,
+            cubic,
             max_receive_buffer_size: config.max_receive_buffer_size(),
             max_message_size: config.max_message_size(),
             my_max_num_outbound_streams: config.max_num_outbound_streams(),
@@ -755,6 +763,7 @@ impl Association {
             srtt_ms: self.rto_mgr.srtt,
             rto_ms: self.rto_mgr.get_rto(),
             in_fast_recovery: self.in_fast_recovery,
+            cubic: self.cubic.is_some(),
             bbr: self.bbr.as_ref().map(|b| {
                 (
                     b.mode().name(),
@@ -2050,6 +2059,18 @@ impl Association {
                     self.pending_queue.len()
                 );
             }
+        } else if let Some(cubic) = &mut self.cubic {
+            // CUBIC's curve in place of a packet a round trip, under the
+            // same conditions as Reno grows: the window in use, and not
+            // while recovering from a loss (the curve starts after it).
+            if !self.in_fast_recovery && !self.pending_queue.is_empty() {
+                let rtt = Duration::from_millis(self.rto_mgr.srtt);
+                self.cwnd = cubic.on_ack(self.cwnd, total_bytes_acked as u32, self.mtu, rtt, now);
+                trace!(
+                    "[{}] updated cwnd={} ssthresh={} acked={} (CUBIC)",
+                    self.side, self.cwnd, self.ssthresh, total_bytes_acked
+                );
+            }
         } else {
             // RFC 4096, sec 7.2.2.  Congestion Avoidance
             //   o  Whenever cwnd is greater than ssthresh, upon each SACK arrival
@@ -2117,7 +2138,11 @@ impl Association {
                             self.in_fast_recovery = true;
                             self.stats.inc_fast_recoveries();
                             self.fast_recover_exit_point = htna;
-                            self.ssthresh = std::cmp::max(self.cwnd / 2, 4 * self.mtu);
+                            // CUBIC keeps 70 % of the window, Reno half.
+                            self.ssthresh = match &mut self.cubic {
+                                Some(cubic) => cubic.on_loss(self.cwnd, self.mtu),
+                                None => std::cmp::max(self.cwnd / 2, 4 * self.mtu),
+                            };
                             self.cwnd = self.ssthresh;
                             self.partial_bytes_acked = 0;
                             self.will_retransmit_fast = true;
@@ -3676,7 +3701,10 @@ impl Association {
                     bbr.on_rto();
                     self.cwnd = bbr.cwnd();
                 } else {
-                    self.ssthresh = std::cmp::max(self.cwnd / 2, 4 * self.mtu);
+                    self.ssthresh = match &mut self.cubic {
+                        Some(cubic) => cubic.on_timeout(self.cwnd, self.mtu),
+                        None => std::cmp::max(self.cwnd / 2, 4 * self.mtu),
+                    };
                     self.cwnd = self.mtu;
                 }
                 trace!(

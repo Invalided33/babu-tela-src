@@ -56,6 +56,26 @@ cargo xtask direto --mb 300 --sem-pausa --so-rele
 
 Cada app mede seu lado da conexão a cada segundo. O teste imprime os totais dos dois lados e uma tabela do envio, com a velocidade, o estado do controle de congestionamento, a banda que ele mediu, a janela, os bytes em trânsito, o tempo de ida e volta, as perdas, os reenvios, os timeouts e o tempo que o envio esperou pela rede. O app instalado grava os totais de cada transferência, uma linha JSON por envio ou download, em `%LOCALAPPDATA%\Prosa\direto\medidas.log`. Com `BABUTELA_DIRETO_LOG=1`, cada segundo também vai para o log do processo. [Medidor](../crates/app/src/direct/meter.rs) · [Linha de teste](../crates/app/src/voice/netem.rs) · [Controle de congestionamento](../vendor/rtc-sctp/src/association/bbr.rs)
 
+### Comparar controles de congestionamento
+
+`--cc reno|cubic|bbr` troca o controle de congestionamento do SCTP nos dois apps, nas chamadas e nos arquivos diretos, pela variável `BABUTELA_SCTP_CC`. Sem a opção, os arquivos diretos usam BBR e as chamadas usam CUBIC. Com `--em-chamada`, Ana e Beto entram numa chamada antes do arquivo, ficam 15 s só na chamada e então o arquivo vai, sem pausa. O teste mede o atraso de boca a ouvido e a porcentagem de voz perdida nas duas fases. Com `--slides N`, não há arquivo: Ana apresenta na chamada um PDF de N páginas de ruído, que chegam ao Beto pelo canal de dados da chamada, e o teste mede quanto tempo levam. A linha de teste tem uma fila só para todos os sockets do app, como o roteador de uma casa, então a voz espera atrás do arquivo. A última linha, `RESULTADO {...}`, resume a rodada em JSON.
+
+| Cenário | Opções de `cargo xtask direto` |
+| --- | --- |
+| Sem linha de teste | `--mb 1000 --sem-pausa` |
+| 40 ms de ida e volta, 0,1% de perda | `--mb 100 --sem-pausa --rede atraso=20,perda=0.1` |
+| 80 ms de ida e volta, 1% de perda | `--mb 8 --sem-pausa --rede atraso=40,perda=1` |
+| Upload de 100 Mbit/s, fila de 100 ms | `--mb 200 --sem-pausa --rede-ana atraso=20,banda=100,fila=100 --rede-beto atraso=20` |
+| Upload de 100 Mbit/s, fila de 5 ms | `--mb 200 --sem-pausa --rede-ana atraso=20,banda=100,fila=5 --rede-beto atraso=20` |
+| Arquivo numa chamada, 20 Mbit/s, fila de 200 ms | `--mb 40 --em-chamada --rede-ana atraso=20,banda=20,fila=200 --rede-beto atraso=20` |
+| Arquivo numa chamada, 20 Mbit/s, fila de 20 ms | `--mb 40 --em-chamada --rede-ana atraso=20,banda=20,fila=20 --rede-beto atraso=20` |
+| Arquivo numa chamada, 2 Mbit/s, fila de 20 ms | `--mb 4 --em-chamada --rede-ana atraso=20,banda=2,fila=20 --rede-beto atraso=20` |
+| Slides, 1% de perda | `--slides 10 --rede atraso=20,perda=1` |
+| Slides, 20 Mbit/s, fila de 200 ms | `--slides 10 --rede-ana atraso=20,banda=20,fila=200 --rede-beto atraso=20` |
+| Slides, 2 Mbit/s, fila de 20 ms | `--slides 4 --rede-ana atraso=20,banda=2,fila=20 --rede-beto atraso=20` |
+
+Cada cenário rodou três vezes com cada controle, alternando os controles entre uma rodada e outra. [Resultados](../build/medidas/controle-congestionamento.jsonl) · [Resumo](../build/medidas/controle-congestionamento.md)
+
 ## Medições
 
 Sem argumentos, `cargo xtask medir` executa `mensagens`, `ocioso`, `figurinhas`, `voz`, `tela`, `midia` e `arquivos`. Também aceita vários cenários por nome. O perfil `medir` gera um app otimizado com compilação incremental. Os cenários adicionais `captura` e `qualidades` comparam caminhos de captura e resoluções na mesma chamada. [Cenários de medição](../crates/xtask/src/medir.rs)

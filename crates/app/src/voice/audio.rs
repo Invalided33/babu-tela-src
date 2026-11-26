@@ -1506,6 +1506,9 @@ impl Decoder {
                 // one (in-band FEC); before it, plain concealment for any
                 // further losses.
                 let lost = usize::from(gap - 1);
+                if ch == 1 {
+                    crate::probe::count("voz.perdidos", lost as u64);
+                }
                 let frame = self.frame.min(longest);
                 for _ in 1..lost.min(3) {
                     if let Ok(n) =
@@ -1524,6 +1527,10 @@ impl Decoder {
             }
         }
         self.last_seq = Some(seq);
+        // Measuring: with `voz.perdidos`, the share of their packets lost.
+        if ch == 1 {
+            crate::probe::count("voz.pacotes", 1);
+        }
         if let Ok(n) = self.decoder.decode_float(payload, &mut self.pcm, false) {
             out.push(&self.pcm[..n * ch]);
             if (FRAME / 8..=longest).contains(&n) {

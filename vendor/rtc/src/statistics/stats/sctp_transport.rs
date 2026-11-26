@@ -62,8 +62,8 @@ pub struct RTCSctpTransportStats {
     pub timeout_retransmissions: u64,
     /// DATA chunks RACK found lost (under BBR).
     pub lost_data_chunks: u64,
-    /// The congestion control: "reno", or BBR's state ("startup", "drain",
-    /// "probe-bw", "probe-rtt").
+    /// The congestion control: "reno", "cubic", or BBR's state ("startup",
+    /// "drain", "probe-bw", "probe-rtt").
     pub congestion_control: String,
     /// Under BBR: the bandwidth it measured and the rate it paces at,
     /// bytes a second, and the lowest round trip, seconds.
@@ -104,7 +104,10 @@ impl RTCSctpTransportStats {
             retransmission_timeouts: s.get_num_t3timeouts(),
             timeout_retransmissions: s.get_num_t3_retrans(),
             lost_data_chunks: s.get_num_lost(),
-            congestion_control: c.bbr.map_or("reno", |b| b.0).to_owned(),
+            congestion_control: c
+                .bbr
+                .map_or(if c.cubic { "cubic" } else { "reno" }, |b| b.0)
+                .to_owned(),
             delivery_rate: c.bbr.map_or(0.0, |b| b.1),
             pacing_rate: c.bbr.map_or(0.0, |b| b.3),
             min_round_trip_time: c.bbr.map_or(0.0, |b| b.2 / 1000.0),

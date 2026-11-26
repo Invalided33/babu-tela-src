@@ -424,6 +424,27 @@ impl Smoke {
             let whole = core.direct.report()["completed"].as_u64().unwrap_or(0);
             return self.hold_while(secs, 600, whole < n.parse().unwrap_or(1));
         }
+        // wait-slides:<seconds>: the presentation in the call went whole:
+        // all of someone else's slides are here, or, presenting, every
+        // slide of mine went to everyone receiving it.
+        if let Some(secs) = step.strip_prefix("wait-slides:") {
+            let report = core.voice.slides().report();
+            let mine = &report["mine"];
+            let whole = if mine.is_null() {
+                report["theirs"].as_array().is_some_and(|l| {
+                    l.iter().any(|t| {
+                        let count = t["count"].as_u64().unwrap_or(0);
+                        count > 0 && t["received"].as_u64() == Some(count)
+                    })
+                })
+            } else {
+                let count = mine["count"].as_u64().unwrap_or(0);
+                mine["sentTo"].as_object().is_some_and(|to| {
+                    count > 0 && !to.is_empty() && to.values().all(|n| n.as_u64() == Some(count))
+                })
+            };
+            return self.hold_while(secs, 120, !whole);
+        }
         // wait-musica:<seconds>: the song at the head of the queue plays
         // (or no link is being read and the queue is empty: it failed).
         if let Some(secs) = step.strip_prefix("wait-musica:") {
@@ -771,7 +792,7 @@ impl Smoke {
             (
                 "wait-sent" | "burst" | "until" | "wait-anims" | "wait-emoji" | "wait-direto-msg"
                 | "wait-direto-pct" | "wait-direto" | "wait-servido" | "wait-salvo" | "wait-musica"
-                | "wait-colado" | "wait-copiado",
+                | "wait-colado" | "wait-copiado" | "wait-slides",
                 _,
             ) => {}
             // direto:on|off: the composer's "Enviar direto", for the files

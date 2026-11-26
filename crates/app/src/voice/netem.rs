@@ -11,7 +11,9 @@
 //!   apps with 20 each make a round trip of 40 ms).
 //! - `perda`: percent of the datagrams lost on the way, at random.
 //! - `banda`: this app's upload, in Mbit/s. What goes faster waits in a
-//!   queue in front of it, as in a home router.
+//!   queue in front of it, as in a home router. All the app's sockets share
+//!   that one queue, as a PC's connections share its router's: a call's
+//!   voice waits behind a file sent directly at the same time.
 //! - `fila`: how long that queue gets, in milliseconds of upload (100 when
 //!   not given). What does not fit is dropped, as a full router drops it.
 //!
@@ -119,7 +121,6 @@ pub(crate) fn wrap(
         inner,
         netem,
         line: Mutex::new(Line {
-            free_at: Instant::now(),
             rng: (nanos ^ (u64::from(port) << 40)) | 1,
         }),
         tx,
@@ -132,10 +133,32 @@ struct Datagram {
     data: Vec<u8>,
 }
 
-/// The upload's queue and the dice.
+/// The app's upload, one for all its sockets: when it is free for the next
+/// datagram (`None` until the first).
+static UPLOAD: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// When a datagram of `len` bytes handed over at `now` has gone out of an
+/// upload of `rate` bytes a second that is free at `free_at` (which moves
+/// past it); `None` when the queue in front already holds more than
+/// `queue`, and a full router drops it.
+fn admit(
+    free_at: &mut Option<Instant>,
+    now: Instant,
+    len: usize,
+    rate: f64,
+    queue: Duration,
+) -> Option<Instant> {
+    let start = free_at.map_or(now, |f| f.max(now));
+    if start - now > queue {
+        return None;
+    }
+    let leaves = start + Duration::from_secs_f64(len as f64 / rate);
+    *free_at = Some(leaves);
+    Some(leaves)
+}
+
+/// A socket's dice.
 struct Line {
-    /// When the upload is free for the next datagram.
-    free_at: Instant,
     rng: u64,
 }
 
@@ -182,24 +205,24 @@ impl AsyncUdpSocket for Impaired {
     fn poll_send(&self, _cx: &mut Context<'_>, t: &Transmit<'_>) -> Poll<io::Result<usize>> {
         let len = t.contents.len();
         let now = Instant::now();
-        let mut line = self.line.lock().unwrap_or_else(PoisonError::into_inner);
         // Lost on the way, or dropped by a full queue: the sender never
         // knows, as with a real line.
-        if self.netem.loss > 0.0 && line.roll() < self.netem.loss {
-            return Poll::Ready(Ok(len));
+        if self.netem.loss > 0.0 {
+            let mut line = self.line.lock().unwrap_or_else(PoisonError::into_inner);
+            if line.roll() < self.netem.loss {
+                return Poll::Ready(Ok(len));
+            }
         }
         let leaves = match self.netem.rate {
             Some(rate) => {
-                let start = line.free_at.max(now);
-                if start - now > self.netem.queue {
-                    return Poll::Ready(Ok(len));
+                let mut free_at = UPLOAD.lock().unwrap_or_else(PoisonError::into_inner);
+                match admit(&mut free_at, now, len, rate, self.netem.queue) {
+                    Some(leaves) => leaves,
+                    None => return Poll::Ready(Ok(len)),
                 }
-                line.free_at = start + Duration::from_secs_f64(len as f64 / rate);
-                line.free_at
             }
             None => now,
         };
-        drop(line);
         let _ = self.tx.send(Datagram {
             at: leaves + self.netem.delay,
             to: t.destination,
@@ -246,11 +269,29 @@ mod tests {
     }
 
     #[test]
+    fn the_upload_is_one_queue_that_drops_what_does_not_fit() {
+        // 1 Mbit/s: 1250 bytes take 10 ms, and a 25 ms queue holds two
+        // behind the one going out.
+        let (rate, queue) = (125_000.0, Duration::from_millis(25));
+        let now = Instant::now();
+        let ms = |at: Option<Instant>| at.map(|at| (at - now).as_secs_f64() * 1000.0);
+        let mut free = None;
+        let gone: Vec<Option<f64>> = (0..4)
+            .map(|_| ms(admit(&mut free, now, 1250, rate, queue)))
+            .collect();
+        for (got, want) in gone.iter().zip([10.0, 20.0, 30.0]) {
+            assert!((got.unwrap() - want).abs() < 0.01, "{gone:?}");
+        }
+        assert_eq!(gone[3], None, "the fourth does not fit");
+        // Once the queue has gone out, it goes at once again.
+        let later = now + Duration::from_millis(100);
+        let at = admit(&mut free, later, 1250, rate, queue).unwrap();
+        assert!(((at - later).as_secs_f64() * 1000.0 - 10.0).abs() < 0.01);
+    }
+
+    #[test]
     fn the_dice_are_fair_enough() {
-        let mut line = Line {
-            free_at: Instant::now(),
-            rng: 12345,
-        };
+        let mut line = Line { rng: 12345 };
         let lost = (0..100_000).filter(|_| line.roll() < 0.01).count();
         assert!((800..1200).contains(&lost), "{lost}");
     }

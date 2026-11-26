@@ -72,11 +72,15 @@ Uso: cargo xtask <comando>
                             fica em silêncio, e quase nada sai dela;
                             --so-tcp: só pelo relé TCP/TLS, como numa rede
                             sem UDP)
-  direto [--mb N] [--so-tcp] [--exe CAMINHO]
+  direto [--mb N] [--so-tcp | --so-rele] [--rede LINHA] [--sem-pausa]
+         [--cc reno|cubic|bbr] [--em-chamada] [--exe CAMINHO]
                             um arquivo grande \"Enviar direto\" entre dois
                             apps neste PC, sem passar pelo servidor: o Beto
                             baixa, pausa na metade, continua e confere o
-                            arquivo byte a byte (--so-tcp: pelo relé)
+                            arquivo byte a byte (--so-tcp: pelo relé; --cc:
+                            outro controle de congestionamento do SCTP;
+                            --em-chamada: numa chamada, medindo o atraso
+                            da voz enquanto o arquivo vai)
   medir [mensagens ocioso figurinhas voz tela midia arquivos captura qualidades]
         [--segundos N] [--rotulo NOME] [--comparar NOME] [--env NOME=VALOR]
         [--ruido ia|padrao|desligada] [--exe CAMINHO] [--giphy]

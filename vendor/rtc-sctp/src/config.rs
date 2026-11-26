@@ -58,6 +58,10 @@ pub enum CongestionControl {
     /// round trip.
     #[default]
     Reno,
+    /// CUBIC (RFC 9438, association/cubic.rs), TCP's default on Windows,
+    /// Linux and macOS: a loss takes 30 % off the window, which grows back
+    /// along a cubic curve of the time since. Loss-based, like Reno.
+    Cubic,
     /// BBR, paced, with time-based loss detection (association/bbr.rs): a
     /// loss costs its retransmission only.
     Bbr,

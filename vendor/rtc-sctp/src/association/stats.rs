@@ -147,6 +147,8 @@ pub struct Congestion {
     pub rto_ms: u64,
     /// In fast recovery from a loss right now.
     pub in_fast_recovery: bool,
+    /// The window follows CUBIC (RFC 9438) instead of Reno.
+    pub cubic: bool,
     /// Under BBR: its state ("startup", "drain", "probe-bw", "probe-rtt"),
     /// the path's bandwidth it measured (bytes a second), its lowest round
     /// trip (milliseconds) and the pacing rate (bytes a second).

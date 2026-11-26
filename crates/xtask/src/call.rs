@@ -432,7 +432,8 @@ pub fn run(args: &[String]) -> Result {
     Ok(())
 }
 
-fn wall_ms() -> f64 {
+/// Milliseconds since 1970, as the apps' `until:` steps take them.
+pub(crate) fn wall_ms() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)

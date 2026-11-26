@@ -302,6 +302,7 @@ async fn talk(
                         break broken(&format!("{len} bytes em {offset}, esperados em {next}"));
                     }
                     next += len as u64;
+                    meter.gauge.arrived();
                     // A full queue is the disk holding the download up.
                     let handing = std::time::Instant::now();
                     let written = w.write(bytes).await;

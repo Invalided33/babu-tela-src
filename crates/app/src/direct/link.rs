@@ -109,7 +109,9 @@ impl Link {
             // halving on every loss allows (vendor/rtc-sctp, bbr.rs): at a
             // 40 ms round trip and one packet in a thousand lost, Reno held
             // a transfer near 1.5 MB/s.
-            .with_sctp_congestion_control(SctpCongestionControl::Bbr)
+            .with_sctp_congestion_control(crate::voice::rtc::sctp_congestion_control(
+                SctpCongestionControl::Bbr,
+            ))
             .with_dtls_extra_secret(pq.hook())
             .build();
         let pc = PeerConnectionBuilder::new()

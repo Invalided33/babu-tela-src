@@ -51,9 +51,17 @@ pub(super) struct Gauge {
     /// starts there, not at the setting up of the connection or the wait for
     /// a turn.
     flowing: Mutex<Option<(Instant, u64)>>,
+    /// When the last of it arrived (the downloader says, chunk by chunk).
+    last: Mutex<Option<Instant>>,
 }
 
 impl Gauge {
+    /// A chunk of the file arrived just now (the downloader's): the
+    /// connection's own time ends with the last, before the disk's flush.
+    pub(super) fn arrived(&self) {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+    }
+
     pub(super) fn waited_on_net(&self, d: Duration) {
         self.net.fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
     }
@@ -95,6 +103,7 @@ impl Meter {
             net: AtomicU64::new(0),
             disk: AtomicU64::new(0),
             flowing: Mutex::new(None),
+            last: Mutex::new(None),
         });
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(run(role, readings, pc, gauge.clone(), file, stopped));
@@ -157,6 +166,7 @@ async fn run(
             what = &mut stopped => {
                 if let Some(mut s) = seconds {
                     s.add_waits(Gauge::take(&gauge.net), Gauge::take(&gauge.disk));
+                    s.arrived = *gauge.last.lock().unwrap_or_else(PoisonError::into_inner);
                     s.finish(
                         gauge.bytes.load(Ordering::Relaxed),
                         &what.unwrap_or_default(),
@@ -215,6 +225,8 @@ struct Seconds {
     rtts: Vec<f64>,
     cwnds: Vec<f64>,
     seconds: Vec<Value>,
+    /// Downloading, at the end: when the last of the file arrived.
+    arrived: Option<Instant>,
 }
 
 impl Seconds {
@@ -235,6 +247,7 @@ impl Seconds {
             rtts: Vec::new(),
             cwnds: Vec::new(),
             seconds: Vec::new(),
+            arrived: None,
         }
     }
 
@@ -333,15 +346,27 @@ impl Seconds {
                 0.0
             }
         };
+        // From the first byte to the last that arrived (downloading): the
+        // connection's own speed, without the disk's flush at the end.
+        let data_secs = self
+            .arrived
+            .map(|at| at.duration_since(self.started).as_secs_f64())
+            .filter(|s| *s > 0.0);
         let summary = json!({
             "papel": self.role,
             "acabou": done,
             "segundos": round(secs, 1),
             "mb": round(moved as f64 / 1e6, 1),
             "mbs": round(if secs > 0.0 { moved as f64 / secs / 1e6 } else { 0.0 }, 2),
+            "dados_s": data_secs.map(|s| round(s, 2)),
+            "mbs_dados": data_secs.map(|s| round(moved as f64 / s / 1e6, 2)),
             "caminho": self.path,
             "controle": self.control,
             "srtt_ms": median(&self.rtts).map(|r| r.round()),
+            // The round trip's worst seconds: the queue a transfer builds
+            // shows here (and every other connection on that line waits in
+            // it too).
+            "srtt_p95_ms": quantile(&self.rtts, 0.95).map(|r| r.round()),
             "janela_media_kb": mean(&self.cwnds).map(|c| (c / 1024.0).round()),
             "recuperacoes": n(|c| c.fast_recoveries),
             "reenvios_rapidos": n(|c| c.fast_retrans),
@@ -465,10 +490,16 @@ fn mean(xs: &[f64]) -> Option<f64> {
 }
 
 fn median(xs: &[f64]) -> Option<f64> {
+    quantile(xs, 0.5)
+}
+
+/// The value `q` (0 to 1) of the way up `xs` sorted.
+fn quantile(xs: &[f64], q: f64) -> Option<f64> {
     if xs.is_empty() {
         return None;
     }
     let mut v = xs.to_vec();
     v.sort_by(f64::total_cmp);
-    Some(v[v.len() / 2])
+    let i = ((v.len() as f64 * q) as usize).min(v.len() - 1);
+    Some(v[i])
 }

@@ -36,6 +36,7 @@ use rtc::media::Sample;
 use rtc::peer_connection::configuration::media_engine::{
     MIME_TYPE_AV1, MIME_TYPE_H264, MIME_TYPE_OPUS,
 };
+use rtc::peer_connection::configuration::setting_engine::SctpCongestionControl;
 use rtc::peer_connection::transport::RTCIceCandidateType;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use rtc::rtp_transceiver::rtp_sender::{
@@ -283,6 +284,31 @@ static HIDE_IP: AtomicBool = AtomicBool::new(false);
 
 pub fn set_hide_ip(on: bool) {
     HIDE_IP.store(on, Ordering::Relaxed);
+}
+
+/// For tests that compare SCTP's congestion controls (`cargo xtask direto
+/// --cc`): reno, cubic or bbr, in place of the usual one (CUBIC in calls,
+/// BBR for files sent directly), on both alike.
+const SCTP_CC_ENV: &str = "BABUTELA_SCTP_CC";
+
+/// The congestion control for a connection's SCTP: `usual`, unless a test
+/// asks for another (SCTP_CC_ENV). A value that is none of the three stops
+/// the app: a test of the wrong one would measure nothing.
+pub(crate) fn sctp_congestion_control(usual: SctpCongestionControl) -> SctpCongestionControl {
+    static ASKED: std::sync::OnceLock<Option<SctpCongestionControl>> = std::sync::OnceLock::new();
+    let asked = *ASKED.get_or_init(|| {
+        let value = std::env::var(SCTP_CC_ENV).ok()?;
+        let cc = match value.trim() {
+            "" => return None,
+            "reno" => SctpCongestionControl::Reno,
+            "cubic" => SctpCongestionControl::Cubic,
+            "bbr" => SctpCongestionControl::Bbr,
+            other => panic!("{SCTP_CC_ENV}={other}: quer reno, cubic ou bbr"),
+        };
+        crate::logln!("rtc: controle de congestionamento do SCTP: {value}");
+        Some(cc)
+    });
+    asked.unwrap_or(usual)
 }
 
 /// The ICE servers the server handed out that this WebRTC stack reaches by
@@ -1702,7 +1728,25 @@ async fn new_pc(
         .with_ice_servers(servers)
         .with_ice_transport_policy(policy)
         .build();
+    // The data channel carries the slides, the ink and the call's own
+    // messages, beside the voice on the same upload. CUBIC (RFC 9438, as
+    // TCP on Windows) takes 30 % off on a loss where Reno takes half, and
+    // with SCTP's small windows that keeps it out of the 1 s timeouts: ten
+    // slides of photos came in 24 s instead of Reno's 44 s over a 40 ms
+    // line losing 1 %, with the voice as with Reno everywhere (`cargo xtask
+    // direto --slides`). Not BBR: it keeps twice the path's capacity in
+    // flight whatever is lost, and on a 2 Mbit/s upload with a 20 ms queue
+    // it took 18 % of the voice with it, against 1.3 to 1.9 %.
+    let cc = sctp_congestion_control(SctpCongestionControl::Cubic);
+    if cc == SctpCongestionControl::Bbr {
+        // BBR paces (vendor/rtc-sctp, bbr.rs), which wants millisecond
+        // timers, as a file sent directly holds them (direct/link.rs). In a
+        // call only a test asks for it: they stay for the rest of the run.
+        static FINE: std::sync::OnceLock<crate::winsys::FineTimers> = std::sync::OnceLock::new();
+        FINE.get_or_init(crate::winsys::FineTimers::hold);
+    }
     let settings = SettingEngineBuilder::new()
+        .with_sctp_congestion_control(cc)
         .with_dtls_extra_secret(pq.hook())
         .build();
     let pc = PeerConnectionBuilder::new()

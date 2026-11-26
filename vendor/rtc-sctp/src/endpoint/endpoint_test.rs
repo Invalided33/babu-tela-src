@@ -3788,8 +3788,9 @@ fn test_abort_closes_both_sides() -> Result<()> {
 }
 
 /// Babu Tela: 4 MiB over a 40 ms round trip that loses one in fifty of the
-/// sender's packets. Both congestion controls deliver it all, in order; BBR
-/// finds the losses with RACK and takes a fraction of Reno's time.
+/// sender's packets. Every congestion control delivers it all, in order;
+/// BBR finds the losses with RACK and takes a fraction of Reno's time, and
+/// CUBIC, loss-based too, stays near Reno.
 #[test]
 fn test_assoc_bbr_delivers_through_random_loss() -> Result<()> {
     use crate::config::CongestionControl;
@@ -3839,11 +3840,22 @@ fn test_assoc_bbr_delivers_through_random_loss() -> Result<()> {
     }
 
     let (reno, reno_c) = transfer(CongestionControl::Reno)?;
+    let (cubic, cubic_c) = transfer(CongestionControl::Cubic)?;
     let (bbr, bbr_c) = transfer(CongestionControl::Bbr)?;
-    eprintln!("4 MiB, 40 ms, 2% lost: Reno {reno:?}, BBR {bbr:?}");
+    eprintln!("4 MiB, 40 ms, 2% lost: Reno {reno:?}, CUBIC {cubic:?}, BBR {bbr:?}");
     let mut reno_stats = reno_c.stats;
     assert!(reno_stats.get_num_fast_retrans() > 0, "Reno saw the losses");
     assert!(bbr_c.bbr.is_some() && reno_c.bbr.is_none());
+    assert!(cubic_c.cubic && !reno_c.cubic && !bbr_c.cubic);
+    let mut cubic_stats = cubic_c.stats;
+    assert!(
+        cubic_stats.get_num_fast_retrans() > 0,
+        "CUBIC saw the losses"
+    );
+    assert!(
+        bbr * 3 < cubic,
+        "BBR took {bbr:?}, CUBIC {cubic:?}: not much faster"
+    );
     assert!(bbr_c.stats.get_num_lost() > 0, "RACK found the losses");
     assert!(
         bbr * 3 < reno,
