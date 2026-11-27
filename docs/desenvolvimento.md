@@ -40,13 +40,14 @@ Com `build/cloudflare.json` configurado para o Worker, use um dos comandos abaix
 | `cargo xtask chamada --pessoas 2 --calado --so-tcp` | Uma pessoa permanece em silêncio e o áudio da outra passa pelo relé TCP/TLS |
 | `cargo xtask direto --mb 200` | O segundo app baixa um arquivo do primeiro, pausa, retoma e compara o resultado byte a byte |
 | `cargo xtask direto --rede atraso=20,perda=0.1` | O mesmo por uma linha de teste com 40 ms de ida e volta e 0,1% de perda, com a tabela de cada segundo da conexão |
+| `cargo xtask direto --queda --mb 300 --rede-ana atraso=20,banda=100,fila=100 --rede-beto atraso=20` | O app que baixa cai na metade e abre de novo no mesmo perfil. O download continua sozinho do que o arquivo parcial tem, conferido pelos hashes, e o resultado é comparado byte a byte |
 | `cargo xtask medir arquivos` | Mede upload e download via servidor com 64 MiB e compara o arquivo enviado pelo próprio app com a cópia baixada e decifrada por ele |
 
 `chamada` abre de duas a seis cópias do cliente na área de trabalho. Aceita `--segundos` de 10 a 90 (padrão 20), `--janela "Título"`, `--placa` para testar a captura pela GPU, ou `--apresentar "C:\dados\slides.pptx"` para apresentar um PPTX ou PDF. `--anotar` requer pelo menos três participantes e uma tela, janela ou apresentação. Os cenários com relé exigem TURN e consomem tráfego do serviço. Nos dois comandos e em `medir`, `--exe target\release\babutela.exe` usa um cliente previamente compilado. [Chamada](../crates/xtask/src/call.rs) · [Transferência direta](../crates/xtask/src/direto.rs)
 
 ### Diagnosticar a velocidade do envio direto
 
-Os dois apps do `direto` rodam no mesmo PC, onde nada se atrasa nem se perde. Para reproduzir a internet entre duas casas, `--rede` coloca uma linha de teste nos sockets WebRTC de cada app: `atraso` é o atraso de ida em ms, `perda` é a porcentagem de pacotes perdidos ao acaso, `banda` é o upload em Mbit/s e `fila` é o tamanho da fila antes dele, em ms. `--rede-ana` e `--rede-beto` valem para um lado só (Ana envia). `--so-rele` passa só pelo TURN por UDP, como em **Esconder meu IP**, e `--so-tcp` só pelo relé TCP/TLS. `--sem-pausa` faz a transferência inteira sem a pausa no meio.
+Os dois apps do `direto` rodam no mesmo PC, onde nada se atrasa nem se perde. Para reproduzir a internet entre duas casas, `--rede` coloca uma linha de teste nos sockets WebRTC de cada app: `atraso` é o atraso de ida em ms, `perda` é a porcentagem de pacotes perdidos ao acaso, `banda` é o upload em Mbit/s e `fila` é o tamanho da fila antes dele, em ms. `--rede-ana` e `--rede-beto` valem para um lado só (Ana envia). `--so-rele` passa só pelo TURN por UDP, como em **Esconder meu IP**, e `--so-tcp` só pelo relé TCP/TLS. `--sem-pausa` faz a transferência inteira sem a pausa no meio. `--queda` troca a pausa por uma queda do app do Beto na metade. Sem uma linha de teste lenta, o arquivo chega inteiro antes da queda.
 
 ```powershell
 cargo xtask direto --mb 300 --sem-pausa --rede atraso=20,perda=0.1
@@ -107,7 +108,7 @@ Para testar uma conversa, use a sessão de teste em `PROSA_SMOKE_TOKEN` e indiqu
 | Emoji | `pop:emoji`, `wait-emoji:30`, `emoji-search:coração`, `emoji-tone:2`, `pop:react` |
 | Chamada e slides | `tela-cheia:on`, `apresentar:C:\dados\aula.pdf`, `slide:2`, `tecla:PageDown`, `apresentar:fim` |
 | Anotações | `anotar:ana`, `ferramenta:rect`, `cor:3`, `arrastar:anotacao`, `desfazer`, `limpar:meus` |
-| Arquivos diretos | `direto:on`, `wait-direto-msg:60`, `baixar:C:\dados`, `pausar-direto`, `continuar-direto`, `wait-direto:60` |
+| Arquivos diretos | `direto:on`, `wait-direto-msg:60`, `baixar:C:\dados`, `pausar-direto`, `continuar-direto`, `wait-direto:60`, `cair` |
 | Colar e copiar | `sem-foco`, `atalho:ctrl+v`, `atalho:ctrl+shift+v`, `wait-colado:30`, `remover-anexo:0`, `copiar-imagem:0`, `wait-copiado:30`, `rclick:imagem:foto.png` |
 | Música | `open:music`, `musica:<link>`, `wait-musica:60`, `volume-todos:65`, `volume-meu:120` |
 

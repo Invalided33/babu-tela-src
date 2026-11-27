@@ -824,6 +824,12 @@ impl Smoke {
                     None => self.misses.push(step.to_owned()),
                 }
             }
+            // cair: the app goes down at once, as in a crash: no report,
+            // and nothing it holds is written or closed on the way out.
+            ("cair", _) => {
+                crate::logln!("smoke: o app cai aqui, de propósito");
+                std::process::exit(3);
+            }
             // emoji-search:<words> searches in the open emoji picker.
             ("emoji-search", words) => {
                 core.emoji_query = words.to_owned();

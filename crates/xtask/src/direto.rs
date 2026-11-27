@@ -20,6 +20,11 @@
 //!   --rede-ana SPEC, --rede-beto SPEC
 //!                                   one side's line only (Ana sends)
 //!   --sem-pausa                     straight through, no pause half-way
+//!   --queda                         no pause: Beto's app goes down half-way,
+//!                                   as in a crash, and opens again; the
+//!                                   download must go on by itself from what
+//!                                   the partial file has (checked against
+//!                                   the pieces' hashes), not start over
 //!   --cc reno|cubic|bbr             SCTP's congestion control in both apps,
 //!                                   in place of the usual (BBR for files,
 //!                                   Reno in calls), to compare them
@@ -83,6 +88,7 @@ pub fn run(args: &[String]) -> Result {
     let mut both: Option<String> = None;
     let mut lines: [Option<String>; 2] = [None, None];
     let mut pause = true;
+    let mut crash = false;
     let mut cc: Option<String> = None;
     let mut in_call = false;
     let mut slides: Option<usize> = None;
@@ -115,6 +121,7 @@ pub fn run(args: &[String]) -> Result {
             "--so-tcp" => way = Way::RelayTcp,
             "--so-rele" => way = Way::RelayUdp,
             "--sem-pausa" => pause = false,
+            "--queda" => crash = true,
             "--rede" => both = Some(rest.next().ok_or("--rede quer a linha")?.clone()),
             "--rede-ana" => lines[0] = Some(rest.next().ok_or("--rede-ana quer a linha")?.clone()),
             "--rede-beto" => {
@@ -126,6 +133,9 @@ pub fn run(args: &[String]) -> Result {
             }
             other => fail!("opção desconhecida: {other}"),
         }
+    }
+    if crash && (in_call || slides.is_some()) {
+        fail!("--queda não vai com --em-chamada nem com --slides");
     }
     for line in &mut lines {
         if line.is_none() {
@@ -184,7 +194,7 @@ pub fn run(args: &[String]) -> Result {
     // In a call: both join it and take the steps at the same moments of
     // the clock, once there has been time to start and connect; the call
     // alone (`base`), then the file while it goes (`carga`).
-    if in_call {
+    if in_call || crash {
         pause = false;
     }
     let start = crate::call::wall_ms() + CALL_SETUP_MS;
@@ -195,11 +205,16 @@ pub fn run(args: &[String]) -> Result {
         "go:first-server|{in_call_first}direto:on|attach:{}|send:|wait-sent:{limit}|mark:carga|wait-servido:1:{limit}|mark:fim|wait:3000",
         file.display()
     );
-    // The pause right as half has come (the steps go 1.5 s apart; a fast
-    // line would be done by the next one).
+    // The pause (or the fall) right as half has come (the steps go 1.5 s
+    // apart; a fast line would be done by the next one).
     let beto = if in_call {
         format!(
             "go:first-server|{in_call_first}wait-direto-msg:120|mark:carga|baixar:{}|wait-direto:{limit}|mark:fim|wait:2000",
+            into.display()
+        )
+    } else if crash {
+        format!(
+            "go:first-server|wait-direto-msg:120|mark:ini|baixar:{}|wait-direto-pct:50:{limit}|cair",
             into.display()
         )
     } else if pause {
@@ -240,12 +255,8 @@ pub fn run(args: &[String]) -> Result {
         }
         env
     };
-    let mut children = Vec::new();
-    for (i, (who, steps)) in [("ana", &ana), ("beto", &beto)].into_iter().enumerate() {
-        if i > 0 {
-            std::thread::sleep(Duration::from_secs(2));
-        }
-        children.push(launch_with(
+    let launch = |i: usize, who: &str, steps: &str| {
+        launch_with(
             &exe,
             &dir,
             who,
@@ -260,9 +271,42 @@ pub fn run(args: &[String]) -> Result {
             in_call,
             None,
             &env_of(i),
-        )?);
+        )
+    };
+    let mut children = Vec::new();
+    for (i, (who, steps)) in [("ana", &ana), ("beto", &beto)].into_iter().enumerate() {
+        if i > 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        children.push(launch(i, who, steps)?);
     }
     let wait_for = Duration::from_secs(seconds + 120);
+    // --queda: Beto's app goes down half-way (`cair`, with no report), and
+    // opens again on the same profile, with nothing to press: the download
+    // goes on as the app signs in.
+    let mut fell = None;
+    if crash {
+        let code = wait_exit(&mut children[1], "beto", wait_for)?;
+        let on_disk = std::fs::metadata(into.join("grande.bin.parcial")).map_or(0, |m| m.len());
+        println!(
+            "    Beto caiu (saiu com {code:?}) com {} de {} no arquivo parcial",
+            tools::mb(on_disk),
+            tools::mb(size)
+        );
+        if into.join("grande.bin").exists() {
+            let _ = children[0].kill();
+            let _ = std::fs::remove_file(&file);
+            let _ = std::fs::remove_file(into.join("grande.bin"));
+            fail!(
+                "o arquivo chegou inteiro antes da queda: use uma linha mais lenta (--rede) ou \
+                 um arquivo maior"
+            );
+        }
+        fell = Some(code);
+        std::thread::sleep(Duration::from_secs(2));
+        let again = format!("go:first-server|mark:volta|wait-direto:{limit}|mark:fim|wait:2000");
+        children[1] = launch(1, "beto", &again)?;
+    }
     let mut reports = Vec::new();
     for (child, who) in children.iter_mut().zip(["ana", "beto"]) {
         reports.push(wait(child, &dir, who, wait_for)?);
@@ -366,6 +410,35 @@ pub fn run(args: &[String]) -> Result {
             problems.push("o arquivo baixado não é igual ao enviado".into());
         }
     }
+    // After the fall, only what the partial file did not have came again:
+    // every attempt since adds a line to the measurements (the one the fall
+    // cut short never did).
+    if let Some(code) = fell {
+        if code != Some(3) {
+            problems.push(format!(
+                "o app do Beto não caiu no passo cair (saiu com {code:?})"
+            ));
+        }
+        let log = dir.join("perfil-beto").join("direto").join("medidas.log");
+        let again: f64 = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|m| m["papel"] == "download")
+            .filter_map(|m| m["mb"].as_f64())
+            .sum();
+        let whole = size as f64 / 1e6;
+        println!(
+            "    Beto, de volta: vieram de novo {again:.1} MB dos {whole:.1} ({:.0}%)",
+            again * 100.0 / whole
+        );
+        if again > whole * 0.75 {
+            problems.push(format!(
+                "depois da queda, o download não continuou do arquivo parcial: \
+                 vieram de novo {again:.1} MB dos {whole:.1}"
+            ));
+        }
+    }
     // How fast, without the pause.
     let mark = |m: &str| beto["marks"][m].as_f64();
     let began = if in_call { "carga" } else { "ini" };
@@ -388,16 +461,23 @@ pub fn run(args: &[String]) -> Result {
         .as_array()
         .cloned()
         .unwrap_or_default();
+    // The send that went to the end: after a fall (--queda), the one to
+    // the app that fell can end after it, when Ana gives up on it.
+    let finished = sends
+        .iter()
+        .rev()
+        .find(|m| m["resumo"]["acabou"] == true)
+        .or(sends.last());
     let fetched = &got["medidas"];
     for (who, m) in [
-        ("Ana (envio)", sends.last()),
+        ("Ana (envio)", finished),
         ("Beto (download)", Some(fetched)),
     ] {
         if let Some(r) = m.map(|m| &m["resumo"]).filter(|r| !r.is_null()) {
             println!("    {who}: {r}");
         }
     }
-    if let Some(last) = sends.last() {
+    if let Some(last) = finished {
         timeline(&last["segundos"]);
     }
     let voice = if in_call {
@@ -406,7 +486,7 @@ pub fn run(args: &[String]) -> Result {
         Value::Null
     };
     // The run in one line, for a series of runs to collect.
-    let sent = sends.last().map_or(Value::Null, |m| m["resumo"].clone());
+    let sent = finished.map_or(Value::Null, |m| m["resumo"].clone());
     let resent =
         sent["reenvios_rapidos"].as_u64().unwrap_or(0) + sent["reenvios"].as_u64().unwrap_or(0);
     let result = serde_json::json!({
@@ -761,7 +841,9 @@ fn timeline(seconds: &Value) {
 }
 
 /// Writes `len` bytes of noise (which no step along the way can shrink) to
-/// `path`; their SHA-256.
+/// `path`; their SHA-256. The file is on the disk before it returns: Beto's
+/// download goes to the same disk, which would otherwise still be writing
+/// this one out while it came, as a disk on another PC would not.
 fn write_noise(path: &Path, len: u64) -> Result<String> {
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
     let mut h = Sha256::new();
@@ -780,8 +862,24 @@ fn write_noise(path: &Path, len: u64) -> Result<String> {
         h.update(&block[..n]);
         left -= n as u64;
     }
-    out.flush()?;
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
     Ok(hex::encode(h.finalize()))
+}
+
+/// Waits for `child` to end when it leaves no report (it fell): how it
+/// ended.
+fn wait_exit(child: &mut std::process::Child, who: &str, limit: Duration) -> Result<Option<i32>> {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status.code());
+        }
+        if started.elapsed() > limit {
+            let _ = child.kill();
+            fail!("o app de {who} não terminou a tempo");
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
 }
 
 fn sha256(path: &Path) -> Result<String> {

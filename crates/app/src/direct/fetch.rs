@@ -2,15 +2,16 @@
 //! whatever stopped it.
 //!
 //! What is already in the partial file counts as far as the list says it
-//! was checked (`verified`, noted as it goes); anything past that is cut,
-//! and the sender is asked for the rest. The pieces' hashes come first
-//! when they are not here yet, checked against the message's root before
-//! anything else; then every piece is checked as it is written, on a
-//! thread of its own, which every few seconds makes sure the disk has it
-//! and notes how far it got. When the disk cannot keep up, that thread's
-//! queue fills, the channel stops being read, and the sender slows down
-//! (the WebRTC stack holds back what the application has not read, and
-//! SCTP's window does the rest).
+//! was checked and made sure on the disk (`verified`), and past that as far
+//! as its pieces match their hashes; anything after is cut, and the sender
+//! is asked for the rest. The pieces' hashes come first when they are not
+//! here yet, checked against the message's root before anything else; then
+//! every piece is checked as it is written, on a thread of its own, which
+//! at the end of the attempt makes sure the disk has them all and notes how
+//! far it got. When the disk cannot keep up, that thread's queue fills, the
+//! channel stops being read, and the sender slows down (the WebRTC stack
+//! holds back what the application has not read, and SCTP's window does
+//! the rest).
 
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -36,8 +37,9 @@ use crate::voice::relay::Relay;
 /// over TCP takes a few seconds more), DTLS and SCTP.
 pub(super) const SETUP: Duration = Duration::from_secs(30);
 
-/// How often what was written is made sure on the disk, and noted.
-const CHECKPOINT: Duration = Duration::from_secs(5);
+/// A sync at the end of an attempt that takes longer than this goes in the
+/// log: a disk that slow holds up how soon a download is whole.
+const SLOW_SYNC: Duration = Duration::from_secs(2);
 
 /// Once it is all here, how long the sender has to close after hearing so.
 const GOT_WAIT: Duration = Duration::from_secs(2);
@@ -134,8 +136,20 @@ async fn attempt(d: &Arc<Direct>, job: &mut Job) -> End {
         }
         return finish(job);
     }
-    let (file, start) = match open_partial(&job.partial, job.verified, job.piece, job.size) {
-        Ok(opened) => opened,
+    // The hashes kept, and the partial file as far as it holds good: past
+    // what the list counts, checking a piece reads it from the disk, not on
+    // the runtime's threads.
+    let (partial, hashes) = (job.partial.clone(), job.hashes.clone());
+    let (verified, piece, size, root) = (job.verified, job.piece, job.size, job.root);
+    let opened = tokio::task::spawn_blocking(move || {
+        let known = load_hashes(&hashes, count, size, piece, &root);
+        let opened = open_partial(&partial, verified, piece, size, known.as_deref());
+        (opened, known)
+    })
+    .await;
+    let (file, start, known) = match opened {
+        Ok((Ok((file, start)), known)) => (file, start, known),
+        Ok((Err(e), _)) => return End::Disk(e.to_string()),
         Err(e) => return End::Disk(e.to_string()),
     };
     job.done
@@ -145,7 +159,6 @@ async fn attempt(d: &Arc<Direct>, job: &mut Job) -> End {
         drop(file);
         return finish(job);
     }
-    let known = load_hashes(&job.hashes, count, job.size, job.piece, &job.root);
     let ice = d.ice().await;
     let relay = Relay::start(ice.as_ref()).await;
     let end = match Link::new(ice.as_ref(), &relay.servers()).await {
@@ -394,12 +407,14 @@ fn finish(job: &Job) -> End {
 }
 
 /// The partial file, cut to the pieces known to be good, ready to go on
-/// from there, and from which piece.
+/// from there, and from which piece: the `verified` ones (a sync made sure
+/// of them), and with the hashes (`list`) those past them that match.
 fn open_partial(
     path: &Path,
     verified: u64,
     piece: u64,
     size: u64,
+    list: Option<&[Hash]>,
 ) -> std::io::Result<(std::fs::File, u64)> {
     let mut file = std::fs::OpenOptions::new()
         .read(true)
@@ -412,11 +427,67 @@ fn open_partial(
     // What the disk has may be less than the list says: the file went, or
     // the PC went down before the disk had it.
     let on_disk = if len >= size { count } else { len / piece };
-    let start = verified.min(count).min(on_disk);
+    let mut start = verified.min(count).min(on_disk);
+    // Past that, what an attempt wrote and did not get to sync (the app or
+    // the PC went down first): whatever matches its hash counts, made sure
+    // on the disk now, as BitTorrent rechecks a download.
+    if let Some(list) = list
+        && start < on_disk
+    {
+        let (from, checking) = (start, Instant::now());
+        start = recheck(&mut file, from, on_disk, piece, size, list);
+        if start > from {
+            file.sync_data()?;
+            crate::logln!(
+                "direto: {} pedaço(s) do arquivo parcial ({:.1} MB) conferem com os hashes \
+                 ({:.1} s) e não vêm de novo",
+                start - from,
+                ((start * piece).min(size) - from * piece) as f64 / 1e6,
+                checking.elapsed().as_secs_f64()
+            );
+        }
+    }
     let at = (start * piece).min(size);
     file.set_len(at)?;
     file.seek(SeekFrom::Start(at))?;
     Ok((file, start))
+}
+
+/// From piece `from`, how far up to `to` the file's pieces match their
+/// hashes: the first piece that does not, or `to`. A piece that cannot be
+/// read does not match.
+fn recheck(
+    file: &mut std::fs::File,
+    from: u64,
+    to: u64,
+    piece: u64,
+    size: u64,
+    list: &[Hash],
+) -> u64 {
+    use std::io::Read;
+    if file.seek(SeekFrom::Start(from * piece)).is_err() {
+        return from;
+    }
+    let mut buf = vec![0u8; hash::BLOCK];
+    let mut i = from;
+    while i < to {
+        let mut left = hash::piece_len(size, piece, i);
+        let mut h = Sha256::new();
+        while left > 0 {
+            let n = (left as usize).min(buf.len());
+            if file.read_exact(&mut buf[..n]).is_err() {
+                return i;
+            }
+            h.update(&buf[..n]);
+            left -= n as u64;
+        }
+        let got: Hash = h.finalize().into();
+        if list.get(i as usize) != Some(&got) {
+            return i;
+        }
+        i += 1;
+    }
+    i
 }
 
 /// The pieces' hashes kept from an earlier attempt, if they are whole and
@@ -433,7 +504,17 @@ enum Failed {
     Corrupt,
 }
 
-/// The thread that writes and checks the pieces.
+/// The thread that writes and checks the pieces. It makes sure the disk has
+/// them (a sync) once, at the end of the attempt, and not every few seconds
+/// as it did: on Windows a sync (FlushFileBuffers) holds up every write to
+/// the file until it is done, even one from another thread with a handle
+/// of its own, and on a slow disk it took seconds. Meanwhile the queue and
+/// SCTP's window filled, and the sender stopped: at 100 Mbit/s one sync
+/// took 5.5 s and the download waited on the disk for 26 % of its time; at
+/// 15 MB/s, with the sync on a thread of its own, writes still waited up to
+/// 0.9 s, and without one, 1 ms. What an attempt wrote and did not get to
+/// sync (the app or the PC went down) is checked against its hashes before
+/// it counts again (`open_partial`).
 struct Writer {
     tx: mpsc::Sender<Bytes>,
     task: tokio::task::JoinHandle<(u64, Option<Failed>)>,
@@ -455,7 +536,6 @@ impl Writer {
             // The piece being written, and how much of it is in.
             let (mut i, mut filled) = (start, 0u64);
             let mut h = Sha256::new();
-            let mut synced = Instant::now();
             let mut failed = None;
             'queue: while let Some(bytes) = rx.blocking_recv() {
                 let mut rest = &bytes[..];
@@ -485,21 +565,22 @@ impl Writer {
                         filled = 0;
                     }
                 }
-                if synced.elapsed() >= CHECKPOINT {
-                    if let Err(e) = sync(&mut out) {
-                        failed = Some(Failed::Disk(e.to_string()));
-                        break;
-                    }
-                    d.checkpoint(owner, &id, i);
-                    synced = Instant::now();
-                }
             }
-            // The pieces checked are made sure on the disk, and noted.
+            // The pieces checked are made sure on the disk, and only then
+            // noted: the list never counts a piece the disk may not have.
+            let syncing = Instant::now();
             match sync(&mut out) {
                 Ok(()) => d.checkpoint(owner, &id, i),
                 Err(e) => {
                     failed.get_or_insert(Failed::Disk(e.to_string()));
                 }
+            }
+            let took = syncing.elapsed();
+            if took > SLOW_SYNC {
+                crate::logln!(
+                    "direto: o disco levou {:.1} s para guardar o fim do que veio",
+                    took.as_secs_f64()
+                );
             }
             (i, failed)
         });
@@ -524,4 +605,119 @@ impl Writer {
 fn sync(out: &mut std::io::BufWriter<std::fs::File>) -> std::io::Result<()> {
     out.flush()?;
     out.get_ref().sync_data()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pieces of 1 KiB (the app's are 4 MiB and up; the arithmetic is the
+    /// same), in a file of 3500 bytes: three whole and one of 428.
+    const PIECE: u64 = 1024;
+    const SIZE: u64 = 3500;
+
+    fn content() -> Vec<u8> {
+        (0..SIZE).map(|i| (i * 7 % 251) as u8).collect()
+    }
+
+    fn hashes(bytes: &[u8]) -> Vec<Hash> {
+        bytes
+            .chunks(PIECE as usize)
+            .map(|c| Sha256::digest(c).into())
+            .collect()
+    }
+
+    /// A partial file in a folder of the test's own, which goes with it.
+    struct Partial(PathBuf);
+
+    impl std::ops::Deref for Partial {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Partial {
+        fn drop(&mut self) {
+            if let Some(dir) = self.0.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    /// A partial file holding `bytes`.
+    fn partial(name: &str, bytes: &[u8]) -> Partial {
+        let dir =
+            std::env::temp_dir().join(format!("babutela-parcial-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("arquivo.parcial");
+        std::fs::write(&path, bytes).unwrap();
+        Partial(path)
+    }
+
+    fn len(path: &Path) -> u64 {
+        std::fs::metadata(path).unwrap().len()
+    }
+
+    #[test]
+    fn pieces_written_and_never_synced_count_once_they_match() {
+        let all = content();
+        let list = hashes(&all);
+        // Everything got there, but the list counts none (the app went down
+        // before the sync at the end of the attempt).
+        let path = partial("todo", &all);
+        let (_, start) = open_partial(&path, 0, PIECE, SIZE, Some(&list)).unwrap();
+        assert_eq!(start, 4);
+        assert_eq!(len(&path), SIZE);
+    }
+
+    #[test]
+    fn the_check_stops_at_the_first_piece_that_does_not_match() {
+        let mut bytes = content();
+        let list = hashes(&bytes);
+        // The third piece did not get to the disk whole (the PC went down).
+        bytes[2 * PIECE as usize + 10] ^= 0xff;
+        let path = partial("estragado", &bytes);
+        let (_, start) = open_partial(&path, 1, PIECE, SIZE, Some(&list)).unwrap();
+        assert_eq!(start, 2);
+        assert_eq!(len(&path), 2 * PIECE);
+    }
+
+    #[test]
+    fn without_the_hashes_only_the_synced_pieces_count() {
+        let all = content();
+        let path = partial("sem-hashes", &all);
+        let (_, start) = open_partial(&path, 1, PIECE, SIZE, None).unwrap();
+        assert_eq!(start, 1);
+        assert_eq!(len(&path), PIECE);
+    }
+
+    #[test]
+    fn a_piece_cut_short_does_not_count_and_the_list_is_not_believed_past_the_file() {
+        let all = content();
+        let list = hashes(&all);
+        // Three whole pieces and a bit of the last; the list says all four.
+        let path = partial("curto", &all[..3200]);
+        let (_, start) = open_partial(&path, 4, PIECE, SIZE, Some(&list)).unwrap();
+        assert_eq!(start, 3);
+        assert_eq!(len(&path), 3 * PIECE);
+        // And a file with less than the list says, without hashes.
+        let path = partial("menor", &all[..1500]);
+        let (_, start) = open_partial(&path, 3, PIECE, SIZE, None).unwrap();
+        assert_eq!(start, 1);
+        assert_eq!(len(&path), PIECE);
+    }
+
+    #[test]
+    fn the_file_goes_on_from_where_the_check_stopped() {
+        let all = content();
+        let list = hashes(&all);
+        let path = partial("continua", &all[..2 * PIECE as usize + 100]);
+        let (mut file, start) = open_partial(&path, 0, PIECE, SIZE, Some(&list)).unwrap();
+        assert_eq!(start, 2);
+        // The next byte written lands right after the pieces that count.
+        file.write_all(&all[2 * PIECE as usize..]).unwrap();
+        drop(file);
+        assert_eq!(std::fs::read(&*path).unwrap(), all);
+    }
 }
