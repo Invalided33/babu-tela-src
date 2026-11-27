@@ -11,9 +11,8 @@ use std::sync::Arc;
 use rtc::peer_connection::configuration::setting_engine::{
     SctpCongestionControl, SctpMaxMessageSize,
 };
-use rtc::peer_connection::transport::RTCIceCandidateType;
 use rtc::statistics::StatsSelector;
-use rtc::statistics::report::{RTCStatsReport, RTCStatsReportEntry};
+use rtc::statistics::report::RTCStatsReport;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use webrtc::data_channel::{DataChannel, RTCDataChannelInit};
@@ -248,48 +247,6 @@ impl Link {
     /// Whether the connection goes through the relay (TURN), once it is up.
     pub async fn relayed(&self) -> bool {
         crate::voice::rtc::relayed(&self.stats().await)
-    }
-
-    /// Whether the data passes a relay at all: mine, or the other side's
-    /// (its relay candidate at the end of the pair). Either relay's limits
-    /// hold the transfer (serve.rs, RELAY_RATE).
-    pub async fn through_relay(&self) -> bool {
-        let report = self.stats().await;
-        let mut pair = None;
-        for entry in report.iter() {
-            if let RTCStatsReportEntry::Transport(t) = entry
-                && !t.selected_candidate_pair_id.is_empty()
-            {
-                pair = Some(t.selected_candidate_pair_id.clone());
-            }
-        }
-        let Some(pair) = pair.and_then(|id| {
-            report.iter().find_map(|e| match e {
-                RTCStatsReportEntry::IceCandidatePair(p) if p.stats.id == id => Some(p),
-                _ => None,
-            })
-        }) else {
-            return false;
-        };
-        // Candidates' own ids carry a prefix the pair's do not.
-        let bare = |id: &str| {
-            id.trim_start_matches("RTCLocalIceCandidate_")
-                .trim_start_matches("RTCRemoteIceCandidate_")
-                .to_owned()
-        };
-        let (local, remote) = (
-            bare(&pair.local_candidate_id),
-            bare(&pair.remote_candidate_id),
-        );
-        report.iter().any(|e| match e {
-            RTCStatsReportEntry::LocalCandidate(c) => {
-                c.candidate_type == RTCIceCandidateType::Relay && bare(&c.stats.id) == local
-            }
-            RTCStatsReportEntry::RemoteCandidate(c) => {
-                c.candidate_type == RTCIceCandidateType::Relay && bare(&c.stats.id) == remote
-            }
-            _ => false,
-        })
     }
 
     async fn stats(&self) -> RTCStatsReport {

@@ -7,6 +7,10 @@
 //! since it was sent stops (wire::Stop::Changed) without a whole piece of it
 //! going out. The channel's send waits once 8 MiB are on their way and not
 //! yet received (link.rs), which paces everything to the connection.
+//! Through the relay too: Cloudflare's TURN lets a few seconds at 34 MB/s
+//! through, then drops what passes its limit, and BBR settles under it, at
+//! 17 to 19 MB/s (build/medidas/rele-sem-teto.md). The 5.5 MB/s cap it had
+//! before BBRv3 made it three times slower.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -48,56 +52,6 @@ const LINGER_STOP: Duration = Duration::from_secs(5);
 
 /// Blocks read ahead of the connection (hash::BLOCK each).
 const AHEAD: usize = 2;
-
-/// Through the relay (TURN), at most this many bytes a second, in messages
-/// of RELAY_CHUNK. Cloudflare's TURN drops an allocation's packets above 5
-/// to 10 thousand a second and 50 to 100 Mbit/s, and one held above that
-/// went dark: with nothing holding it back, a send went at 34 MB/s for 8 s
-/// and then nothing more arrived; at 7.5 MB/s in bursts of 256 KiB (SCTP
-/// paces a burst at the rate BBR measured, 16 to 21 MB/s) it went dark for
-/// 15 s. 5.5 MB/s in small messages keeps under 5 thousand packets a second
-/// (`cargo xtask direto --so-rele`).
-const RELAY_RATE: f64 = 5.5e6;
-
-/// The messages through the relay, and what its limit lets go at once: a
-/// few milliseconds' worth, so SCTP never has a burst to send.
-const RELAY_CHUNK: usize = 16 * 1024;
-const RELAY_BURST: f64 = 2.0 * RELAY_CHUNK as f64;
-
-/// Holds the file to `rate` bytes a second, a block at a time.
-struct Throttle {
-    rate: f64,
-    credit: f64,
-    last: std::time::Instant,
-}
-
-impl Throttle {
-    fn new(rate: f64) -> Throttle {
-        Throttle {
-            rate,
-            credit: RELAY_BURST,
-            last: std::time::Instant::now(),
-        }
-    }
-
-    /// Waits until `n` more bytes may go.
-    async fn wait(&mut self, n: usize) {
-        let refill = |t: &mut Throttle| {
-            let now = std::time::Instant::now();
-            t.credit =
-                (t.credit + now.duration_since(t.last).as_secs_f64() * t.rate).min(RELAY_BURST);
-            t.last = now;
-        };
-        refill(self);
-        let need = n as f64;
-        if self.credit < need {
-            let secs = (need - self.credit) / self.rate;
-            tokio::time::sleep(Duration::from_secs_f64(secs)).await;
-            refill(self);
-        }
-        self.credit -= need;
-    }
-}
 
 pub(super) struct Job {
     /// Who asked, about which message, and their attempt's number.
@@ -448,21 +402,9 @@ async fn transfer(
     let (tx, mut rx) = mpsc::channel::<Block>(AHEAD);
     let (path, size, piece) = (job.path.clone(), job.size, job.piece);
     let reader = tokio::task::spawn_blocking(move || read(&path, size, piece, from, &list, &tx));
-    // Through a relay (mine or theirs), no faster than it takes
-    // (RELAY_RATE).
-    let mut throttle = if link.through_relay().await {
-        crate::logln!(
-            "direto: para {} pelo relé, até {:.1} MB/s",
-            job.from,
-            RELAY_RATE / 1e6
-        );
-        Some(Throttle::new(RELAY_RATE))
-    } else {
-        None
-    };
     // Since when nothing was handed to the connection: waiting on the disk
     // (the reader). Handing it over waits on the connection when its
-    // buffer is full (or on the relay's limit).
+    // buffer is full.
     let mut idle = std::time::Instant::now();
     let result = loop {
         tokio::select! {
@@ -470,15 +412,8 @@ async fn transfer(
                 Some(Block::Data(offset, bytes)) => {
                     gauge.waited_on_disk(idle.elapsed());
                     let handing = std::time::Instant::now();
-                    let sent = send_block(
-                        channel,
-                        &mut job.halt,
-                        &job.sent,
-                        &mut throttle,
-                        offset,
-                        &bytes,
-                    )
-                    .await;
+                    let sent =
+                        send_block(channel, &mut job.halt, &job.sent, offset, &bytes).await;
                     gauge.waited_on_net(handing.elapsed());
                     idle = std::time::Instant::now();
                     if let Err(e) = sent {
@@ -522,26 +457,16 @@ async fn transfer(
     say(channel, &wire::done()).await.map_err(Ended::Fell)
 }
 
-/// One block of the file, in chunks (smaller ones, and no faster than the
-/// relay takes, when `throttle` holds it).
+/// One block of the file, in chunks.
 async fn send_block(
     channel: &Arc<dyn DataChannel>,
     halt: &mut watch::Receiver<Halt>,
     sent: &AtomicU64,
-    throttle: &mut Option<Throttle>,
     offset: u64,
     bytes: &[u8],
 ) -> Result<(), Ended> {
-    let size = if throttle.is_some() {
-        RELAY_CHUNK
-    } else {
-        wire::CHUNK
-    };
-    for (k, c) in bytes.chunks(size).enumerate() {
-        let at = offset + (k * size) as u64;
-        if let Some(t) = throttle {
-            t.wait(c.len()).await;
-        }
+    for (k, c) in bytes.chunks(wire::CHUNK).enumerate() {
+        let at = offset + (k * wire::CHUNK) as u64;
         put(channel, halt, wire::chunk(wire::DATA, at, c)).await?;
         sent.fetch_add(c.len() as u64, Ordering::Relaxed);
     }
